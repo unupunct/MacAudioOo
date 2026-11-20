@@ -1,7 +1,7 @@
 import Foundation
 
 /// Compressor settings shared between UI (writer) and real-time thread (reader).
-struct CompressorParams {
+struct CompressorParams: Codable, Equatable {
     var enabled: Int32 = 0
     var thresholdDB: Float = -18
     var ratio: Float = 3

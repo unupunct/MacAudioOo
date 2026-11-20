@@ -1,0 +1,36 @@
+name: build
+# Compiles the app and driver and runs the unit tests on modern macOS runners (the development Mac runs Monterey and cannot
+# compile or exercise anything newer). Audio-hardware checks are not run here: runners have no audio device.
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+      - name: Build app (universal, macOS 12 deployment target)
+        run: ARCHS="x86_64 arm64" scripts/build.sh release
+      - name: Build audio driver
+        run: ARCHS="x86_64 arm64" scripts/build-driver.sh
+      - name: Unit tests
+        run: scripts/test.sh
+      - name: Driver self-test (no audio hardware needed)
+        run: scripts/driver-selftest.sh
+      - name: Package both DMGs (ad-hoc signed)
+        if: matrix.os == 'macos-14'
+        run: scripts/package.sh all
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-14'
+        with:
+          name: dmgs
+          path: dist/*

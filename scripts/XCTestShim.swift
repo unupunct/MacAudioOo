@@ -41,6 +41,38 @@ func XCTAssertGreaterThan<T: Comparable>(_ a: @autoclosure () -> T, _ b: @autocl
     if !(x > y) { shimFailures += 1; print("  FAIL \(file):\(line) XCTAssertGreaterThan \(x) !> \(y)") }
 }
 
+func XCTAssertNotEqual<T: Equatable>(_ a: @autoclosure () -> T, _ b: @autoclosure () -> T, _ m: String = "", file: StaticString = #file, line: UInt = #line) {
+    let x = a(), y = b()
+    if x == y { shimFailures += 1; print("  FAIL \(file):\(line) XCTAssertNotEqual \(x) == \(y) \(m)") }
+}
+func XCTAssertGreaterThanOrEqual<T: Comparable>(_ a: @autoclosure () -> T, _ b: @autoclosure () -> T, file: StaticString = #file, line: UInt = #line) {
+    let x = a(), y = b()
+    if !(x >= y) { shimFailures += 1; print("  FAIL \(file):\(line) XCTAssertGreaterThanOrEqual \(x) !>= \(y)") }
+}
+func XCTAssertLessThanOrEqual<T: Comparable>(_ a: @autoclosure () -> T, _ b: @autoclosure () -> T, file: StaticString = #file, line: UInt = #line) {
+    let x = a(), y = b()
+    if !(x <= y) { shimFailures += 1; print("  FAIL \(file):\(line) XCTAssertLessThanOrEqual \(x) !<= \(y)") }
+}
+
+struct XCTSkipOrFail: Error { var message: String }
+
+func XCTFail(_ m: String = "", file: StaticString = #file, line: UInt = #line) {
+    shimFailures += 1; print("  FAIL \(file):\(line) XCTFail \(m)")
+}
+func XCTUnwrap<T>(_ e: @autoclosure () throws -> T?, _ m: String = "", file: StaticString = #file, line: UInt = #line) throws -> T {
+    if let v = try e() { return v }
+    shimFailures += 1; print("  FAIL \(file):\(line) XCTUnwrap found nil \(m)")
+    throw XCTSkipOrFail(message: "nil")
+}
+func XCTAssertThrowsError<T>(_ e: @autoclosure () throws -> T, _ m: String = "", file: StaticString = #file, line: UInt = #line) {
+    do { _ = try e(); shimFailures += 1; print("  FAIL \(file):\(line) XCTAssertThrowsError did not throw \(m)") } catch {}
+}
+func XCTAssertNoThrow<T>(_ e: @autoclosure () throws -> T, _ m: String = "", file: StaticString = #file, line: UInt = #line) {
+    do { _ = try e() } catch { shimFailures += 1; print("  FAIL \(file):\(line) XCTAssertNoThrow threw \(error) \(m)") }
+}
+
+private typealias ThrowingIMP = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>?) -> Bool
+
 /// Finds every XCTestCase subclass and runs its `test*` methods.
 func runAllShimTests(_ types: [XCTestCase.Type]) -> Int32 {
     var ran = 0
@@ -51,14 +83,24 @@ func runAllShimTests(_ types: [XCTestCase.Type]) -> Int32 {
         for j in 0..<Int(mcount) {
             let sel = method_getName(methods[j])
             let name = NSStringFromSelector(sel)
-            guard name.hasPrefix("test"), !name.contains(":") else { continue }
+            guard name.hasPrefix("test") else { continue }
             let before = shimFailures
-            let inst = type.init()
-            inst.setUp()
-            _ = inst.perform(sel)
-            inst.tearDown()
+            var shownName = name
+            if !name.contains(":") {
+                let inst = type.init(); inst.setUp(); _ = inst.perform(sel); inst.tearDown()
+            } else if name.hasSuffix("AndReturnError:") {
+                // `func testX() throws` is exposed to Objective-C as -testXAndReturnError:
+                shownName = String(name.dropLast("AndReturnError:".count))
+                let inst = type.init(); inst.setUp()
+                let imp = unsafeBitCast(method_getImplementation(methods[j]), to: ThrowingIMP.self)
+                var err: NSError?
+                if !imp(inst, sel, &err) {
+                    if err != nil && shimFailures == before { shimFailures += 1; print("  FAIL \(name) threw \(String(describing: err))") }
+                }
+                inst.tearDown()
+            } else { continue }
             ran += 1
-            print("\(shimFailures == before ? "PASS" : "FAIL") \(NSStringFromClass(cls)).\(name)")
+            print("\(shimFailures == before ? "PASS" : "FAIL") \(NSStringFromClass(cls)).\(shownName)")
         }
     }
     print("Executed \(ran) tests, \(shimFailures) failures")

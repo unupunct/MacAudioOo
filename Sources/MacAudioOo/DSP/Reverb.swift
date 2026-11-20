@@ -1,7 +1,7 @@
 import Foundation
 
 /// Reverb parameters (shared effect). Read by the render thread, written by the UI.
-struct ReverbParams {
+struct ReverbParams: Codable, Equatable {
     var enabled: Int32 = 1
     var returnLevel: Float = 0.5     // linear gain of the wet return into the master bus
     var roomSize: Float = 0.5        // 0...1 : scales the delay-line lengths (0.6x ... 1.4x)

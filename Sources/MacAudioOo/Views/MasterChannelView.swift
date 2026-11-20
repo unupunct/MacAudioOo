@@ -25,9 +25,9 @@ struct MasterChannelView: View {
             }
 
             HStack(alignment: .top, spacing: 3) {
-                LevelMeterView(model: hub.masterL, width: 14, height: 132)
-                LevelMeterView(model: hub.masterR, width: 14, height: 132)
-                FaderView(db: Binding(get: { engine.masterVolumeDB }, set: { engine.masterVolumeDB = $0 }), height: 150)
+                LevelMeterView(model: hub.masterL, width: 14, height: 118)
+                LevelMeterView(model: hub.masterR, width: 14, height: 118)
+                FaderView(db: Binding(get: { engine.masterVolumeDB }, set: { engine.masterVolumeDB = $0 }), height: 136)
             }
             Text(dbText(engine.masterVolumeDB) + " dB").font(Theme.value)
                 .foregroundColor(Theme.textPrimary).frame(width: 90)

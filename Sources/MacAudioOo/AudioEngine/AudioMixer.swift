@@ -17,6 +17,18 @@ struct ChannelState {
     var source: Unmanaged<ChannelSource>? = nil
     var dsp: Unmanaged<ChannelDSP>? = nil      // optional EQ/compressor/sends chain
     var gainReductionDB: Float = 0             // compressor gain reduction (render thread)
+    var recRing: Unmanaged<AudioRingBuffer>? = nil   // stem recording tap (post EQ/compressor, pre-fader, dry)
+    var group: Int32 = -1                      // -1 none, 0...3 = group A...D
+    var duckGain: Float = 1                    // set by the ducking controller (linear)
+    var inputRmsSquares: Float = 0             // pre-fader level of the last block (for ducking triggers)
+    var inputRmsCount: Float = 0
+}
+
+/// Per-group settings used by the render thread (group fader acts as a multiplier on members).
+struct GroupRT {
+    var gain: Float = 1
+    var mute = false
+    var solo = false
 }
 
 struct MasterState {
@@ -35,6 +47,7 @@ struct MasterState {
     var reverb = ReverbParams()
     var delay = DelayParams()
     var eq: Unmanaged<EQProcessor>? = nil      // master EQ (optional)
+    var mixRing: Unmanaged<AudioRingBuffer>? = nil   // stereo-mix recording tap (after master processing)
 }
 
 /// Sums channels (each: EQ → compressor → volume/balance/mute/solo), adds shared reverb and
@@ -66,14 +79,17 @@ final class AudioMixer {
     struct Storage {
         let slots: UnsafeMutablePointer<ChannelState>
         let master: UnsafeMutablePointer<MasterState>
+        let groups: UnsafeMutablePointer<GroupRT>
         static func allocate() -> Storage {
             let s = UnsafeMutablePointer<ChannelState>.allocate(capacity: AudioMixer.maxChannels)
             s.initialize(repeating: ChannelState(), count: AudioMixer.maxChannels)
             let m = UnsafeMutablePointer<MasterState>.allocate(capacity: 1); m.initialize(to: MasterState())
-            return Storage(slots: s, master: m)
+            let g = UnsafeMutablePointer<GroupRT>.allocate(capacity: 4); g.initialize(repeating: GroupRT(), count: 4)
+            return Storage(slots: s, master: m, groups: g)
         }
-        func deallocate() { slots.deallocate(); master.deallocate() }
+        func deallocate() { slots.deallocate(); master.deallocate(); groups.deallocate() }
     }
+    let groups: UnsafeMutablePointer<GroupRT>
 
     /// Uses `storage` if given (not owned); otherwise allocates and owns its own.
     init(sampleRate: Double, storage: Storage? = nil) {
@@ -81,7 +97,7 @@ final class AudioMixer {
         smoothing = 1 - expf(-1 / (0.010 * Float(sampleRate)))   // ~10 ms time constant
         let st = storage ?? Storage.allocate()
         ownsStorage = storage == nil
-        slots = st.slots; master = st.master
+        slots = st.slots; master = st.master; groups = st.groups
         func buf() -> UnsafeMutablePointer<Float> {
             let p = UnsafeMutablePointer<Float>.allocate(capacity: AudioMixer.maxBlock)
             p.initialize(repeating: 0, count: AudioMixer.maxBlock); return p
@@ -92,7 +108,7 @@ final class AudioMixer {
         delay = DelayProcessor(sampleRate: sampleRate)
     }
     deinit {
-        if ownsStorage { slots.deallocate(); master.deallocate() }
+        if ownsStorage { slots.deallocate(); master.deallocate(); groups.deallocate() }
         for p in [scratchL, scratchR, accL, accR, revSend, dlySend, wetL, wetR] { p.deallocate() }
     }
 
@@ -109,7 +125,10 @@ final class AudioMixer {
         for i in 0..<n { accL[i] = 0; accR[i] = 0; revSend[i] = 0; dlySend[i] = 0 }
 
         var anySolo = false
-        for c in 0..<Self.maxChannels where slots[c].active && slots[c].solo { anySolo = true; break }
+        for c in 0..<Self.maxChannels where slots[c].active {
+            let g = Int(slots[c].group)
+            if slots[c].solo || (g >= 0 && g < 4 && groups[g].solo) { anySolo = true; break }
+        }
 
         for c in 0..<Self.maxChannels {
             guard slots[c].active, let src = slots[c].source else { continue }
@@ -130,8 +149,20 @@ final class AudioMixer {
                 }
             }
 
-            let gate: Float = (slots[c].mute || (anySolo && !slots[c].solo)) ? 0 : 1
-            let target = slots[c].volumeTarget * gate
+            // Pre-fader level (post EQ/compressor): used by ducking triggers.
+            var inSq: Float = 0
+            for i in 0..<n { inSq += scratchL[i] * scratchL[i] + scratchR[i] * scratchR[i] }
+            slots[c].inputRmsSquares = inSq; slots[c].inputRmsCount = Float(n * 2)
+
+            // Stem recording tap: dry, post EQ/compressor, before fader/mute/solo/sends.
+            if let rr = slots[c].recRing { rr._withUnsafeGuaranteedRef { $0.write(scratchL, scratchR, frames: n) } }
+
+            let grp = Int(slots[c].group)
+            let inGroup = grp >= 0 && grp < 4
+            let soloed = slots[c].solo || (inGroup && groups[grp].solo)
+            let muted = slots[c].mute || (inGroup && groups[grp].mute)
+            let gate: Float = (muted || (anySolo && !soloed)) ? 0 : 1
+            let target = slots[c].volumeTarget * gate * (inGroup ? groups[grp].gain : 1) * slots[c].duckGain
             let bal = slots[c].balance
             let balL: Float = min(1, 1 - bal), balR: Float = min(1, 1 + bal)
             var g = slots[c].volumeCurrent
@@ -188,6 +219,9 @@ final class AudioMixer {
         } else {
             master.pointee.limiterGain = 1
         }
+
+        // Stereo-mix recording tap: after all master processing (EQ, volume, DIM/MONO, limiter).
+        if let mr = master.pointee.mixRing { mr._withUnsafeGuaranteedRef { $0.write(outL, outR, frames: n) } }
 
         var pl: Float = 0, pr: Float = 0, sq: Float = 0
         for i in 0..<n {

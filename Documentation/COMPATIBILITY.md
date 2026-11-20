@@ -9,10 +9,10 @@
 Detection logic lives in `AudioEngine/BackendCapability.swift` and is unit tested.
 Unsupported features are shown as unavailable in Settings ▸ Audio, never as working.
 
-## Status (Phase 1)
+## Status
 
-Verified on real hardware: macOS 12.7.6, Intel — builds, launches, 7/7 unit tests pass,
-real Core Audio output-device enumeration.
-
-Not yet implemented: capture, routing, mixing, recording, DJ, library, menu bar.
-Not yet tested: macOS 13, 14, 15, Apple Silicon.
+Verified on real hardware: macOS 12.7.6, Intel only (see TEST_RESULTS.md). Detection logic for 12, 13, 14.1, 14.2 and 15 is unit
+tested; the app has not been run on any other version or on Apple silicon. The macOS 14.2+ process-tap backend is written but has
+never been compiled against the 14.2 SDK or run (its symbols are resolved at run time so the binary still loads on macOS 12).
+The macOS 12 driver is verified without installation (`scripts/driver-selftest.sh`); loading it into the real `coreaudiod`
+is the next hardware test.

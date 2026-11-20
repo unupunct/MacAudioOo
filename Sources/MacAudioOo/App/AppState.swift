@@ -7,8 +7,17 @@ final class AppState: ObservableObject {
     let devices = AudioDeviceManager()
     let engine = AudioEngine()
     let processes = AudioProcessManager()
+    lazy var recordingLibrary = RecordingLibrary(root: URL(fileURLWithPath: settings.recordingDirectory))
+    lazy var recorder = RecordingEngine(engine: engine, library: recordingLibrary)
+    lazy var library = MusicLibrary()
+    lazy var dj = DJEngine()
+    lazy var scenes = SceneManager(engine: engine)
+    lazy var history = MixerHistory(engine: engine)
+    lazy var ducking = DuckingController(engine: engine)
+    private(set) var menuBar: MenuBarController?
     @Published private(set) var capabilities: [BackendCapability] = CapabilityDetector.detectCurrent()
     @Published private(set) var driverBackend: VirtualDriverBackend?
+    @Published private(set) var tapBackend: CoreAudioTapBackend?
     var preferredBackend: BackendCapability? { CapabilityDetector.preferred(from: capabilities) }
     private var bag = Set<AnyCancellable>()
 
@@ -16,6 +25,13 @@ final class AppState: ObservableObject {
     /// Monterey driver backend when it is usable. Never touches system audio settings.
     func refreshBackends() {
         capabilities = CapabilityDetector.detectCurrent()
+        tapBackend?.stop(); tapBackend = nil
+        if let cap = capabilities.first(where: { $0.kind == .coreAudioTap && $0.usable }) {
+            let b = CoreAudioTapBackend(capability: cap, engine: engine)
+            b.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+            tapBackend = b
+            try? b.start()
+        }
         driverBackend?.stop(); driverBackend = nil
         if let cap = capabilities.first(where: { $0.kind == .virtualDriver && $0.usable }) {
             let b = VirtualDriverBackend(capability: cap, engine: engine)
@@ -32,7 +48,22 @@ final class AppState: ObservableObject {
         engine.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
 
         // Follow output-device choice and hot-plug/default changes.
+        AppLog.shared.log("MacAudioOo started on macOS \(OSVersion.current.description)")
+        engine.preferredBufferFrames = UInt32(max(0, settings.bufferFrames))
         engine.selectOutput(uid: settings.outputDeviceUID, devices: devices)
+        settings.$bufferFrames.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] n in
+            guard let self = self else { return }
+            self.engine.preferredBufferFrames = UInt32(max(0, n))
+            self.engine.restartOutput(devices: self.devices)
+            AppLog.shared.log("Requested buffer size: \(n == 0 ? "device default" : "\(n) frames")")
+        }.store(in: &bag)
+        engine.$status.removeDuplicates().receive(on: DispatchQueue.main).sink { status in
+            switch status {
+            case .running(let d, let r): AppLog.shared.log("Engine running on \(d) @ \(Int(r)) Hz")
+            case .stopped: AppLog.shared.log("Engine stopped")
+            case .failed(let m): AppLog.shared.log("Engine ERROR: \(m)")
+            }
+        }.store(in: &bag)
         settings.$outputDeviceUID.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] uid in
             guard let self = self else { return }
             self.engine.selectOutput(uid: uid, devices: self.devices)
@@ -47,10 +78,43 @@ final class AppState: ObservableObject {
         }.store(in: &bag)
 
         refreshBackends()
+        recordingLibrary.refresh()          // also repairs recordings interrupted by a crash
+        _ = recorder                        // start observing channels/engine right away
+        scenes.currentOutputUID = { [weak self] in self?.settings.outputDeviceUID }
+        scenes.applyOutputUID = { [weak self] uid in
+            guard let self = self, let uid = uid, self.devices.device(uid: uid) != nil else { return }
+            self.settings.outputDeviceUID = uid
+        }
+        _ = history
+
+        // DJ: preferences, library hooks, and the output device (the mixer's device, never the system default).
+        dj.fourDecks = settings.djFourDecks
+        dj.bpmRange = settings.bpmMin...max(settings.bpmMin + 10, settings.bpmMax)
+        dj.tempoRange = settings.djTempoRange
+        dj.onAnalysis = { [weak self] id, r in self?.library.setAnalysis(id, bpm: r.bpm, firstBeat: r.firstBeat) }
+        dj.onPlayed = { [weak self] id in self?.library.markPlayed(id) }
+        engine.$status.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self = self else { return }
+            self.dj.setOutputDevice(id: self.devices.device(uid: self.engine.currentDeviceUID)?.id)
+        }.store(in: &bag)
+        Publishers.CombineLatest3(settings.$bpmMin, settings.$bpmMax, settings.$djTempoRange).sink { [weak self] lo, hi, range in
+            self?.dj.bpmRange = lo...max(lo + 10, hi); self?.dj.tempoRange = range
+        }.store(in: &bag)
         // The driver device appearing/disappearing (install, removal, audio restart) restarts the backend.
         devices.$driverDeviceLoaded.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
             self?.refreshBackends()
         }.store(in: &bag)
+
+        // Menu bar item, launch at login, ducking.
+        let bar = MenuBarController(engine: engine)
+        menuBar = bar
+        settings.$menuBarEnabled.receive(on: DispatchQueue.main).sink { bar.setVisible($0) }.store(in: &bag)
+        settings.$launchAtLogin.dropFirst().sink { on in
+            if let err = LoginItem.set(on) { AppLog.shared.log(err) } else { AppLog.shared.log("Launch at login \(on ? "enabled" : "disabled")") }
+        }.store(in: &bag)
+        _ = ducking
+        recorder.$lastError.compactMap { $0 }.sink { AppLog.shared.log("Recording: \($0)") }.store(in: &bag)
+        dj.$error.compactMap { $0 }.sink { AppLog.shared.log("DJ: \($0)") }.store(in: &bag)
 
         // Tear down a channel when its application quits.
         processes.onTerminate = { [weak self] pid in
@@ -79,7 +143,8 @@ final class AppState: ObservableObject {
     var engineStatusDetail: String {
         switch engine.status {
         case .running(let d, let r):
-            var s = "Output: \(d) @ \(Int(r)) Hz."
+            var s = "Output: \(d) @ \(Int(r)) Hz. Render load \(Int(engine.cpuLoad * 100)) % (worst block \(Int(engine.worstBlockLoad * 100)) % of its time)."
+            if engine.health == .strained || engine.health == .overloaded { s += " The engine is struggling to keep up: close other heavy apps or raise the buffer size in Settings." }
             if preferredBackend == nil {
                 s += " No app-capture backend on macOS \(OSVersion.current.description); only generated test signals can be mixed."
             }

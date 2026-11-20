@@ -11,8 +11,8 @@ OUT=build/drvtest; rm -rf "$OUT"; mkdir -p "$OUT/src"
 clang -O1 -arch "$(uname -m)" -mmacosx-version-min=12.0 -framework CoreAudio -framework CoreFoundation \
   Driver/selftest.c -o "$OUT/selftest"
 
-for f in RingBuffer ChannelSource AudioMixer AudioChannel DriverSharedMemory; do cp Sources/MacAudioOo/AudioEngine/$f.swift "$OUT/src/"; done
-cp Sources/MacAudioOo/DSP/Limiter.swift "$OUT/src/"
+for f in RingBuffer ChannelSource AudioMixer AudioChannel ChannelDSP DriverSharedMemory; do cp Sources/MacAudioOo/AudioEngine/$f.swift "$OUT/src/"; done
+for f in Limiter Biquad Equalizer Compressor Reverb Delay; do cp Sources/MacAudioOo/DSP/$f.swift "$OUT/src/"; done
 cat > "$OUT/src/main.swift" <<'SWIFT'
 import Foundation
 let name = "/MacAudioOo.selftest"

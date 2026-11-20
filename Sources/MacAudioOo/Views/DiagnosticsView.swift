@@ -101,6 +101,7 @@ struct MasterDiagRow: View {
 /// Simple horizontal level bar: green below -12 dB, yellow to -3 dB, orange above.
 struct MeterBar: View {
     let db: Float
+    var width: CGFloat = 120
     var body: some View {
         let frac = CGFloat(max(0, min(1, (db + 60) / 60)))
         ZStack(alignment: .leading) {
@@ -111,7 +112,7 @@ struct MeterBar: View {
                     .frame(width: g.size.width * frac)
             }
         }
-        .frame(width: 120, height: 8)
+        .frame(width: width, height: 8)
         .overlay(RoundedRectangle(cornerRadius: 2).stroke(Theme.border))
     }
 }

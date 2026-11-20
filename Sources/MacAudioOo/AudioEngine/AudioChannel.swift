@@ -12,7 +12,16 @@ final class AudioChannel: ObservableObject, Identifiable {
     private let slot: UnsafeMutablePointer<ChannelState>
     let dsp: ChannelDSP
 
-    @Published var volumeDB: Float = 0 { didSet { slot.pointee.volumeTarget = dbToLinear(volumeDB) } }
+    /// Called by the engine so linked groups can move together. (channel, previous volume in dB)
+    var onVolumeChange: ((AudioChannel, Float) -> Void)?
+
+    @Published var volumeDB: Float = 0 {
+        didSet { slot.pointee.volumeTarget = dbToLinear(volumeDB); onVolumeChange?(self, oldValue) }
+    }
+    /// Group assignment: -1 none, 0...3 = GROUP A...D.
+    @Published var group: Int = -1 { didSet { slot.pointee.group = Int32(group) } }
+    /// Armed for stem recording (locked while a recording is running).
+    @Published var recArm = false
     @Published var balance: Float = 0 { didSet { slot.pointee.balance = balance } }
     @Published var mute = false { didSet { slot.pointee.mute = mute } }
     @Published var solo = false { didSet { slot.pointee.solo = solo } }
@@ -61,4 +70,16 @@ final class AudioChannel: ObservableObject, Identifiable {
 
     /// Compressor gain reduction in dB (>= 0).
     func readGainReduction() -> Float { slot.pointee.gainReductionDB }
+
+    /// Non-destructive pre-fader RMS level of the last rendered block, in dB (for ducking triggers).
+    func inputRMSdB() -> Float {
+        let c = slot.pointee.inputRmsCount
+        return c > 0 ? linearToDB(sqrtf(slot.pointee.inputRmsSquares / c)) : -120
+    }
+
+    /// Linear gain applied by the ducking controller (1 = no ducking).
+    var duckGain: Float {
+        get { slot.pointee.duckGain }
+        set { slot.pointee.duckGain = newValue }
+    }
 }

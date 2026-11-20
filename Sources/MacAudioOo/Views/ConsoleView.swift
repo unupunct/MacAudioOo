@@ -8,6 +8,7 @@ struct ConsoleView: View {
     @State private var selection: Selection = .none
     @State private var showDetail = true
     @State private var toneCount = 0
+    @State private var spill: Int? = nil
 
     enum Selection: Equatable { case none, channel(UUID), master }
 
@@ -17,6 +18,7 @@ struct ConsoleView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(spacing: 6) {
                     toolbar(engine)
+                    GroupBarView(engine: engine, spill: $spill)
                     if engine.channels.isEmpty { emptyState } else { strips(engine) }
                 }
                 EffectsPanelView(engine: engine)
@@ -40,9 +42,12 @@ struct ConsoleView: View {
 
     private func toolbar(_ engine: AudioEngine) -> some View {
         HStack(spacing: 8) {
-            Text("CHANNELS").font(Theme.label).foregroundColor(Theme.textSecondary)
-            Text("\(engine.channels.count)").font(Theme.value).foregroundColor(Theme.textPrimary)
-            Spacer()
+            Text("\(engine.channels.count) ch").font(Theme.value).foregroundColor(Theme.textSecondary).lineLimit(1).fixedSize()
+            SceneBarView(scenes: state.scenes, history: state.history)
+            Spacer(minLength: 4)
+            ConsoleButton(title: "DUCK", isOn: Binding(get: { state.ducking.config.manualDuck }, set: { state.ducking.config.manualDuck = $0 }),
+                          onColor: Theme.meterYellow, width: 40,
+                          help: "Manual duck: lower all background applications now (automatic ducking is in Settings)")
             Menu {
                 Button("Generated test tone (diagnostic)") { addTone() }
                     .disabled(!engine.status.isRunning)
@@ -50,16 +55,18 @@ struct ConsoleView: View {
                 Text("Application channels appear automatically once a capture backend is active.")
             } label: {
                 Label("Add Channel", systemImage: "plus")
-            }.frame(width: 130)
-            Button(showDetail ? "Hide detail" : "Show detail") { showDetail.toggle() }
+            }.frame(width: 118)
+            Button(action: { showDetail.toggle() }) { Image(systemName: showDetail ? "chevron.down.square" : "chevron.up.square") }
+                .help(showDetail ? "Hide the EQ / compressor panel" : "Show the EQ / compressor panel")
         }
     }
 
     private func strips(_ engine: AudioEngine) -> some View {
         ScrollView(.horizontal, showsIndicators: true) {
             HStack(alignment: .top, spacing: 8) {
-                ForEach(engine.channels) { ch in
+                ForEach(engine.channels.filter { spill == nil || $0.group == spill }) { ch in
                     ChannelStripView(channel: ch, meter: hub.model(for: ch), isSelected: selection == .channel(ch.id),
+                                     recordingLocked: state.recorder.state != .idle,
                                      onSelect: { selection = selection == .channel(ch.id) ? .none : .channel(ch.id) },
                                      onRemove: { if selection == .channel(ch.id) { selection = .none }; engine.removeChannel(ch) })
                 }

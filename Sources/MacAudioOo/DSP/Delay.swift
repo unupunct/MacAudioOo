@@ -1,6 +1,6 @@
 import Foundation
 
-struct DelayParams {
+struct DelayParams: Codable, Equatable {
     var enabled: Int32 = 1
     var returnLevel: Float = 0.5
     var timeMs: Float = 350

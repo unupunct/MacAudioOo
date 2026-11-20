@@ -19,12 +19,47 @@ final class AudioOutput {
     private(set) var bufferFrames: UInt32 = 0
     private(set) var latencyFrames: UInt32 = 0
     /// Render-thread counters (read from UI for diagnostics only).
-    let counters = UnsafeMutablePointer<UInt64>.allocate(capacity: 4)   // [0]=rendered, [1]=frames, [2]=entered, [3]=buffer count
+    let counters = UnsafeMutablePointer<UInt64>.allocate(capacity: 8)   // [0]=rendered, [1]=frames, [2]=entered, [3]=buffer count, [4]=render ticks, [5]=worst block ticks, [6]=blocks over 80 % budget
 
-    init() { counters.initialize(repeating: 0, count: 4) }
+    /// Constants for converting render time to load (read by the render callback, set before start).
+    fileprivate(set) var sampleRateForLoad: Double = 48000
+    let ticksPerSecond: Double = {
+        var tb = mach_timebase_info_data_t(); mach_timebase_info(&tb)
+        return 1e9 * Double(tb.denom) / Double(tb.numer)
+    }()
+
+    init() { counters.initialize(repeating: 0, count: 8) }
+
+    /// Fraction of real time spent rendering (0...1). Near or above 1 means the engine cannot keep up and audio will glitch.
+    var cpuLoad: Double {
+        let frames = Double(counters[1]); guard frames > 0, sampleRate > 0 else { return 0 }
+        return Double(counters[4]) / ticksPerSecond / (frames / sampleRate)
+    }
+    var worstBlockLoad: Double {
+        guard bufferFrames > 0, sampleRate > 0 else { return 0 }
+        return Double(counters[5]) / ticksPerSecond / (Double(bufferFrames) / sampleRate)
+    }
+    var overBudgetBlocks: UInt64 { counters[6] }
     deinit { stop(); counters.deallocate() }
 
     var isRunning: Bool { unit != nil }
+    /// 0 = leave the device's current buffer size alone. Otherwise requested (clamped to the device's range) at start.
+    var requestedBufferFrames: UInt32 = 0
+
+    private func applyBufferRequest(device: AudioDeviceID) {
+        guard requestedBufferFrames > 0 else { return }
+        var rangeAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyBufferFrameSizeRange, mScope: kAudioObjectPropertyScopeGlobal,
+                                                   mElement: kAudioObjectPropertyElementMain)
+        var range = AudioValueRange(); var rsize = UInt32(MemoryLayout<AudioValueRange>.size)
+        var want = Float64(requestedBufferFrames)
+        if AudioObjectGetPropertyData(device, &rangeAddr, 0, nil, &rsize, &range) == noErr {
+            want = min(max(want, range.mMinimum), range.mMaximum)
+        }
+        var frames = UInt32(want)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyBufferFrameSize, mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        AudioObjectSetPropertyData(device, &addr, 0, nil, UInt32(MemoryLayout<UInt32>.size), &frames)
+    }
 
     func start(device: AudioDevice, mixerFactory: (Double) -> AudioMixer) throws {
         stop()
@@ -44,6 +79,7 @@ final class AudioOutput {
             var zero: UInt32 = 0, one: UInt32 = 1
             try check(AudioUnitSetProperty(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &zero, 4), "Disable input")
             try check(AudioUnitSetProperty(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &one, 4), "Enable output")
+            applyBufferRequest(device: device.id)
             var dev = device.id
             try check(AudioUnitSetProperty(u, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &dev,
                                            UInt32(MemoryLayout<AudioDeviceID>.size)), "Select output device")
@@ -59,7 +95,8 @@ final class AudioOutput {
 
             let m = mixerFactory(rate)
             mixer = m
-            for i in 0..<4 { counters[i] = 0 }
+            for i in 0..<8 { counters[i] = 0 }
+            sampleRateForLoad = rate
             let ctx = Unmanaged.passUnretained(self).toOpaque()
             var cb = AURenderCallbackStruct(inputProc: { refCon, _, _, _, frames, ioData -> OSStatus in
                 let out = Unmanaged<AudioOutput>.fromOpaque(refCon).takeUnretainedValue()
@@ -70,8 +107,13 @@ final class AudioOutput {
                 guard bufs.count >= 2,
                       let l = bufs[0].mData?.assumingMemoryBound(to: Float.self),
                       let r = bufs[1].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
+                let t0 = mach_absolute_time()
                 mixer.render(frames: Int(frames), left: l, right: r)
+                let spent = mach_absolute_time() &- t0                      // mach ticks spent rendering this block
                 out.counters[0] += 1; out.counters[1] += UInt64(frames)
+                out.counters[4] += spent                                    // total render ticks
+                if spent > out.counters[5] { out.counters[5] = spent }      // worst block since start
+                if Double(spent) > Double(frames) / out.sampleRateForLoad * out.ticksPerSecond * 0.8 { out.counters[6] += 1 }   // used > 80 % of the block's time
                 return noErr
             }, inputProcRefCon: ctx)
             try check(AudioUnitSetProperty(u, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &cb,

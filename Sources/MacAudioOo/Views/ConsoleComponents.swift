@@ -184,6 +184,7 @@ struct VerticalSlider: View {
     var range: ClosedRange<Float>
     var height: CGFloat = 90
     var defaultValue: Float = 0
+    var step: Float = 0.5
     var onEdit: () -> Void = {}
 
     var body: some View {
@@ -201,7 +202,7 @@ struct VerticalSlider: View {
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in
             let f = 1 - min(1, max(0, (v.location.y - 4) / (height - 8)))
             let nv = range.lowerBound + Float(f) * (range.upperBound - range.lowerBound)
-            value = (nv * 2).rounded() / 2          // 0.5 dB steps
+            value = (nv / step).rounded() * step    // default 0.5 steps
             onEdit()
         })
         .simultaneousGesture(TapGesture(count: 2).onEnded { value = defaultValue; onEdit() })
@@ -273,6 +274,65 @@ struct ConsoleButton: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+/// Lightweight push button (plain style, no AppKit button measurement): used where many buttons are nested in
+/// deep stacks, where standard NSButton-backed controls made SwiftUI layout take minutes.
+struct PlainButton: View {
+    var title: String? = nil
+    var systemImage: String? = nil
+    var width: CGFloat? = nil
+    var height: CGFloat = 22
+    var tint: Color = Theme.panelRaised
+    var action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let i = systemImage { Image(systemName: i).font(.system(size: 11, weight: .bold)) }
+                if let t = title { Text(t).font(.system(size: 10, weight: .heavy, design: .rounded)).lineLimit(1) }
+            }
+            .foregroundColor(Theme.textPrimary)
+            .padding(.horizontal, width == nil ? 8 : 0)
+            .frame(width: width, height: height)
+            .background(RoundedRectangle(cornerRadius: 5).fill(tint))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.border))
+            .opacity(enabled ? 1 : 0.4)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Custom-drawn linear horizontal slider (no NSSlider): drag to set, double-click to reset.
+struct LinearHSlider: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double>
+    var width: CGFloat = 90
+    var defaultValue: Double? = nil
+    private let capW: CGFloat = 14, capH: CGFloat = 20
+
+    var body: some View {
+        let travel = width - capW
+        let frac = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2).fill(Theme.well).frame(width: width, height: 5)
+                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Theme.border))
+            RoundedRectangle(cornerRadius: 3)
+                .fill(LinearGradient(colors: [Color(white: 0.42), Color(white: 0.25)], startPoint: .top, endPoint: .bottom))
+                .frame(width: capW, height: capH)
+                .overlay(Rectangle().fill(Theme.accent).frame(width: 2, height: capH - 8))
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.black.opacity(0.6)))
+                .offset(x: travel * frac)
+        }
+        .frame(width: width, height: capH)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+            let f = Double(min(1, max(0, (v.location.x - capW / 2) / travel)))
+            value = range.lowerBound + f * (range.upperBound - range.lowerBound)
+        })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if let d = defaultValue { value = d } })
     }
 }
 

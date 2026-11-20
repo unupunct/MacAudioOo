@@ -12,14 +12,10 @@ struct RootView: View {
                 switch settings.selectedTab {
                 case .settings: SettingsView()
                 case .console: ConsoleView()
-                case .classic: NotImplementedView(tab: "CLASSIC", phase: "Phase 4",
-                    detail: "The simplified mixer shares the Console engine and is built after it.")
-                case .recording: NotImplementedView(tab: "RECORDING", phase: "Phase 5",
-                    detail: "Recording will write real captured audio to 48 kHz / 24-bit WAV files.")
-                case .dj: NotImplementedView(tab: "DJ", phase: "Phase 6",
-                    detail: "Decks, waveforms, BPM analysis and the crossfader are planned for Phase 6.")
-                case .library: NotImplementedView(tab: "LIBRARY", phase: "Phase 6",
-                    detail: "The media library is built alongside the DJ decks.")
+                case .classic: ClassicView()
+                case .recording: RecordingView(recorder: state.recorder)
+                case .dj: DJView(dj: state.dj)
+                case .library: LibraryView(library: state.library, dj: state.dj)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -69,9 +65,14 @@ struct TopBar: View {
 
 struct EngineStatusPill: View {
     @EnvironmentObject var state: AppState
+    /// Green = running and keeping up, yellow = strained (render blocks used > 80 % of their time), orange = overloaded or not running.
+    private var healthColor: Color {
+        guard state.engine.status.isRunning else { return Theme.meterOrange }
+        switch state.engine.health { case .good, .idle: return Theme.meterGreen; case .strained: return Theme.meterYellow; case .overloaded: return Theme.meterOrange }
+    }
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(state.engine.status.isRunning ? Theme.meterGreen : Theme.meterOrange).frame(width: 8, height: 8)
+            Circle().fill(healthColor).frame(width: 8, height: 8)
             Text(state.engineStatusText).font(Theme.label).foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
         }
         .padding(.horizontal, 10).padding(.vertical, 5)

@@ -11,6 +11,7 @@ final class AudioRingBuffer {
     private let right: UnsafeMutablePointer<Float>
     private let idx: UnsafeMutablePointer<Int>   // [0] = write, [1] = read
     private let underruns: UnsafeMutablePointer<Int>
+    private let overflows: UnsafeMutablePointer<Int>
 
     init(minimumFrames: Int) {
         var c = 1
@@ -20,17 +21,21 @@ final class AudioRingBuffer {
         left.initialize(repeating: 0, count: c); right.initialize(repeating: 0, count: c)
         idx = .allocate(capacity: 2); idx.initialize(repeating: 0, count: 2)
         underruns = .allocate(capacity: 1); underruns.initialize(to: 0)
+        overflows = .allocate(capacity: 1); overflows.initialize(to: 0)
     }
-    deinit { left.deallocate(); right.deallocate(); idx.deallocate(); underruns.deallocate() }
+    deinit { left.deallocate(); right.deallocate(); idx.deallocate(); underruns.deallocate(); overflows.deallocate() }
 
     var availableToRead: Int { idx[0] - idx[1] }
     var underrunCount: Int { underruns.pointee }
+    /// Frames the producer had to drop because the consumer fell behind (e.g. a disk stall).
+    var overflowedFrames: Int { overflows.pointee }
 
     /// Producer side. Returns frames actually written (drops excess when full).
     @discardableResult
     func write(_ l: UnsafePointer<Float>, _ r: UnsafePointer<Float>, frames: Int) -> Int {
         let w = idx[0], rd = idx[1]
         let n = min(frames, capacity - (w - rd))
+        if n < frames { overflows.pointee += frames - max(n, 0) }
         if n <= 0 { return 0 }
         for i in 0..<n { left[(w + i) & mask] = l[i]; right[(w + i) & mask] = r[i] }
         OSMemoryBarrier()

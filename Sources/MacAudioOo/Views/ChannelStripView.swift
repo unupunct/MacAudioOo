@@ -6,6 +6,7 @@ struct ChannelStripView: View {
     @ObservedObject var channel: AudioChannel
     @ObservedObject var meter: MeterModel
     var isSelected: Bool
+    var recordingLocked = false
     var onSelect: () -> Void
     var onRemove: () -> Void
 
@@ -53,10 +54,29 @@ struct ChannelStripView: View {
                               onColor: Theme.meterYellow, width: 36, help: "Compressor on/off (settings in the detail panel)")
             }
 
+            HStack(spacing: 4) {
+                Menu {
+                    Button("No group") { channel.group = -1 }
+                    ForEach(0..<4, id: \.self) { i in Button("GROUP " + GroupState.letters[i]) { channel.group = i } }
+                } label: {
+                    Text(channel.group < 0 ? "GRP" : "GRP " + GroupState.letters[channel.group])
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .foregroundColor(channel.group < 0 ? Theme.textSecondary : .black)
+                        .frame(width: 44, height: 20)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(channel.group < 0 ? Theme.panelRaised : Theme.accent))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.border))
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 44)
+                .help("Assign this channel to a group (A–D)")
+                ConsoleButton(title: "REC", isOn: $channel.recArm, onColor: Theme.record, width: 30,
+                              help: recordingLocked ? "Arming is locked while recording" : "Arm this channel's stem for recording")
+                    .disabled(recordingLocked)
+            }
+
             // Meter + fader
             HStack(alignment: .top, spacing: 4) {
-                LevelMeterView(model: meter, width: 12, height: 132)
-                FaderView(db: $channel.volumeDB, height: 150)
+                LevelMeterView(model: meter, width: 12, height: 108)
+                FaderView(db: $channel.volumeDB, height: 126)
             }
             Text(dbText(channel.volumeDB) + " dB").font(Theme.value)
                 .foregroundColor(Theme.textPrimary).frame(width: 84)
@@ -88,6 +108,6 @@ struct ChannelStripView: View {
     private func reset() {
         channel.volumeDB = 0; channel.balance = 0; channel.mute = false; channel.solo = false
         channel.eqGains = [Float](repeating: 0, count: EQProcessor.bandCount); channel.eqPresetName = "Flat"
-        channel.comp = CompressorParams(); channel.reverbSend = 0; channel.delaySend = 0
+        channel.comp = CompressorParams(); channel.reverbSend = 0; channel.delaySend = 0; channel.group = -1
     }
 }

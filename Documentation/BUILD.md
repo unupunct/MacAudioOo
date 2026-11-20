@@ -12,6 +12,21 @@ scripts/test.sh                     # unit tests
 
 Output: `build/MacAudioOo.app` (ad-hoc signed; Developer ID signing and notarization are Phase 8).
 
+## More scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/build-driver.sh` | builds `build/MacAudioOo.driver` |
+| `scripts/driver-selftest.sh` | loads the driver like coreaudiod would; no root, no install |
+| `scripts/engine-smoke.sh` | plays two tones through the real output and prints meters |
+| `scripts/package.sh monterey`, `modern`, `all` | DMG installers (see RELEASE.md) |
+| `scripts/make-icon.swift` | generates the app icon (run automatically by `build.sh`) |
+
+Developer switches of the app itself (not used in normal operation): `--snapshot out.png --tab <tab> [--demo-channels|--demo-dj]`
+renders the app window to a PNG and quits; `--record-test result.txt` and `--switch-test result.txt` run the hardware checks
+described in TEST_RESULTS.md. **Never judge audio performance on a debug build**: `build.sh debug` is unoptimized and the
+render callback is several times too slow.
+
 ## Development setup used so far
 
 Source is edited on Windows and synced to a MacBook Air (Intel, macOS 12.7.6, Swift 5.7.2,

@@ -12,6 +12,7 @@ clang -bundle -Wall -Wextra -Wno-unused-parameter -O2 $ARCH_FLAGS -mmacosx-versi
   -framework CoreAudio -framework CoreFoundation \
   Driver/MacAudioOoDriver.c -o "$BUNDLE/Contents/MacOS/MacAudioOoDriver"
 cp Driver/Resources/Info.plist "$BUNDLE/Contents/Info.plist"
-codesign --force --sign "${SIGN_IDENTITY:--}" "$BUNDLE"
+if [ "${SIGN_IDENTITY:--}" = "-" ]; then codesign --force --sign - "$BUNDLE"
+else codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$BUNDLE"; fi
 plutil -lint "$BUNDLE/Contents/Info.plist" >/dev/null
 echo "Built $BUNDLE ($(lipo -archs "$BUNDLE/Contents/MacOS/MacAudioOoDriver"))"

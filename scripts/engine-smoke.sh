@@ -6,7 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT=build/smoke; rm -rf "$OUT"; mkdir -p "$OUT/src"
-for f in $(find Sources/MacAudioOo -name '*.swift' ! -name MacAudioOoApp.swift ! -path '*Views*' ! -name AppState.swift ! -name AppSettings.swift); do cp "$f" "$OUT/src/$(basename "$f")"; done
+# Core engine only (no UI, no app state).
+for f in AudioEngine/AudioEngine AudioEngine/AudioOutput AudioEngine/AudioMixer AudioEngine/AudioChannel AudioEngine/ChannelSource          AudioEngine/ChannelDSP AudioEngine/RingBuffer AudioEngine/GroupState AudioEngine/AudioDeviceManager DSP/Biquad DSP/Equalizer          DSP/Compressor DSP/Reverb DSP/Delay DSP/Limiter; do cp "Sources/MacAudioOo/$f.swift" "$OUT/src/"; done
 cat > "$OUT/src/main.swift" <<'SWIFT'
 import Foundation
 let devices = AudioDeviceManager()
