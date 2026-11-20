@@ -21,7 +21,12 @@ enum SnapshotTool {
         if let t = args.firstIndex(of: "--tab"), t + 1 < args.count, let tab = AppTab(rawValue: args[t + 1].uppercased()) {
             state.settings.selectedTab = tab
         }
-        if let r = argValue("--recording-root") { state.recordingLibrary.setRoot(URL(fileURLWithPath: r)) }
+        // Show a neutral recording folder instead of the real home path (screenshots are published); restored afterwards.
+        let previousRecordingDir = state.settings.recordingDirectory
+        if let r = argValue("--recording-root") {
+            state.recordingLibrary.setRoot(URL(fileURLWithPath: r))
+            state.settings.recordingDirectory = argValue("--recording-label") ?? r
+        }
         if args.contains("--demo-channels") { addDemoChannels(state) }
         var demoIDs = Set<UUID>()
         if args.contains("--demo-dj") { addDemoDJ(state) { demoIDs = $0 } }
@@ -30,6 +35,7 @@ enum SnapshotTool {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             defer {
                 state.settings.selectedTab = previousTab
+                state.settings.recordingDirectory = previousRecordingDir
                 if !demoIDs.isEmpty { state.library.remove(demoIDs) }       // leave the user's library untouched
                 NSApp.terminate(nil)
             }

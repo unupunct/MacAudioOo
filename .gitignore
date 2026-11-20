@@ -3,3 +3,4 @@ build/
 dist/
 *.dmg
 .DS_Store
+Resources/AppIcon.iconset/

@@ -1,3 +1,5 @@
+<p align="center"><img src="Resources/AppIcon-1024.png" width="128" alt="MacAudioOo icon"></p>
+
 # MacAudioOo
 
 **A native macOS audio mixer, recording studio and DJ workstation.**
