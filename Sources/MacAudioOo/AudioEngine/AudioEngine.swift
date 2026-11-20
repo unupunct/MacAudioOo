@@ -49,7 +49,12 @@ final class AudioEngine: ObservableObject {
 
     /// Call whenever the device list or default device changes.
     func reconcile(devices: AudioDeviceManager) {
-        let target = devices.device(uid: preferredUID) ?? devices.device(uid: devices.defaultOutputUID)
+        // Chosen device -> system default -> built-in -> anything. (When the system default is
+        // the MacAudioOo virtual device it is not in this list, so we fall through to real hardware.)
+        let target = devices.device(uid: preferredUID)
+            ?? devices.device(uid: devices.defaultOutputUID)
+            ?? devices.outputDevices.first { $0.transport == "Built-in" }
+            ?? devices.outputDevices.first
         guard let device = target else {
             output.stop(); status = .failed("No output device available"); return
         }

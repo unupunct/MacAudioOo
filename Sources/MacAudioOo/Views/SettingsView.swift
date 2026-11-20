@@ -27,6 +27,7 @@ struct SettingsView: View {
                     if state.preferredBackend == nil {
                         note("⚠︎ No backend on this system can provide independent per-application volume. Install the optional virtual audio driver (Monterey) to enable mixing.")
                     }
+                    if OSVersion.current < OSVersion(major: 14, minor: 2, patch: 0) { DriverStatusView() }
                     Divider().overlay(Theme.border)
                     Text("Output devices").font(Theme.label).foregroundColor(Theme.textSecondary)
                     ForEach(state.devices.outputDevices) { d in

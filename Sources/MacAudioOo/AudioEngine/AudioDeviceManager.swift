@@ -46,10 +46,23 @@ final class AudioDeviceManager: ObservableObject {
 
     private func refreshAsync() { DispatchQueue.main.async { [weak self] in self?.refresh() } }
 
+    /// UID of the MacAudioOo virtual device (see Driver/MacAudioOoDriver.c).
+    static let driverDeviceUID = "com.unupunct.MacAudioOo.Mixer"
+    @Published private(set) var driverDeviceLoaded = false
+
     func refresh() {
         let all = Self.allDevices()
-        outputDevices = all.filter { $0.outputChannels > 0 }
+        driverDeviceLoaded = all.contains { $0.uid == Self.driverDeviceUID }
+        // Our own virtual device is never an output target: routing the mixer back into the
+        // device it reads from would create a feedback loop.
+        outputDevices = all.filter { $0.outputChannels > 0 && $0.uid != Self.driverDeviceUID }
         defaultOutputUID = Self.defaultOutputDeviceID().flatMap { id in all.first { $0.id == id }?.uid }
+    }
+
+    /// True when the system default output is the MacAudioOo virtual device.
+    var systemDefaultIsDriver: Bool {
+        guard let id = Self.defaultOutputDeviceID() else { return false }
+        return Self.allDevices().first { $0.id == id }?.uid == Self.driverDeviceUID
     }
 
     func device(uid: String?) -> AudioDevice? {

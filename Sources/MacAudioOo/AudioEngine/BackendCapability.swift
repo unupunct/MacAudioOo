@@ -40,7 +40,7 @@ struct OSVersion: Comparable, Equatable, CustomStringConvertible {
 }
 
 enum CapabilityDetector {
-    static let driverPath = "/Library/Audio/Plug-Ins/HAL/MacAudioOoDriver.driver"
+    static let driverPath = "/Library/Audio/Plug-Ins/HAL/MacAudioOo.driver"
 
     /// Pure function of OS version + driver presence so it can be unit tested.
     static func detect(os: OSVersion, driverInstalled: Bool) -> [BackendCapability] {

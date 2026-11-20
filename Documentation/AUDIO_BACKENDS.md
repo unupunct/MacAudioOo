@@ -33,6 +33,6 @@ driven over SSH) refuses to start any audio (even `afplay` fails with -66681); u
 | Process discovery (`AudioProcessManager`) | Implemented: lists running GUI apps with icon/PID, tears channels down on app quit. Does not yet say which apps are producing sound. |
 | Core Audio Process Taps (macOS 14.2+) | **Not implemented.** Cannot be built or tested on the Monterey dev Mac (SDK 13.1). Needs a macOS 14.2+ machine. Task: create tap + aggregate device per process, feed `AudioRingBuffer`, mute original output, resolve the 14.2 symbols so the binary still loads on older systems. |
 | ScreenCaptureKit (macOS 13–14.1) | **Not implemented.** Capture-only by design (cannot silence the original output). |
-| Virtual audio driver (macOS 12) | **Not implemented.** Requires a separately signed AudioServerPlugIn; planned as its own sub-project. |
+| Virtual audio driver (macOS 12) | **Implemented, partly verified.** AudioServerPlugIn in `Driver/`, app side in `VirtualDriverBackend` / `DriverSharedMemory`. Verified without installing (`scripts/driver-selftest.sh`): independent per-client streams, correct pitch/level, resampling 48→44.1 kHz, per-channel volume independence. **Not yet verified:** loading in the real coreaudiod and real applications. See `DRIVER.md`. |
 
 Until a backend exists the mixer can only play generated test tones; the UI says so.
