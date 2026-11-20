@@ -102,6 +102,141 @@ enum SnapshotTool {
         }
     }
 
+    // MARK: Hot-plug, crash and quit tests (used by scripts/driver-crashtest.sh)
+
+    /// `--probe-log file seconds`: appends one line per second (status, channels with live peaks, device, callbacks) and quits
+    /// after `seconds` (0 = keep running). Lets an external script observe the app while it kills/quits other things.
+    static func runProbeLogIfRequested(state: AppState) {
+        guard let path = argValue("--probe-log") else { return }
+        let seconds = Int(CommandLine.arguments.drop { $0 != "--probe-log" }.dropFirst(2).first ?? "0") ?? 0
+        let engine = state.engine
+        var n = 0
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { t in
+            let chans = engine.channels.map { "\($0.name):" + String(format: "%.1f", $0.readMeter().peakDB) }.joined(separator: ",")
+            let line = "\(Int(Date().timeIntervalSince1970))|\(engine.status.isRunning ? "running" : "not-running")|n=\(engine.channels.count)|\(chans)|dev=\(engine.currentDeviceUID ?? "-")|cb=\(engine.callbackCount)\n"
+            if let h = FileHandle(forWritingAtPath: path) { _ = try? h.seekToEnd(); try? h.write(contentsOf: Data(line.utf8)); try? h.close() }
+            else { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
+            n += 1
+            if seconds > 0 && n >= seconds { t.invalidate(); NSApp.terminate(nil) }
+        }
+    }
+
+    /// `--quit-restore-test`: sets the system output to the driver, then quits normally. With the opt-in setting on, the quit
+    /// hook must put the previous output back (the calling script checks and resets the setting).
+    static func runQuitRestoreTestIfRequested(state: AppState) {
+        guard CommandLine.arguments.contains("--quit-restore-test") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            AppLog.shared.log("quit-restore-test: setting output to the driver, restore-on-quit = \(state.settings.restoreOutputOnQuit)")
+            state.devices.setDefaultOutput(uid: AudioDeviceManager.driverDeviceUID)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NSApp.terminate(nil) }
+        }
+    }
+
+    /// Output-device unplug/replug without hardware: a temporary aggregate output device (public Core Audio API) stands in for
+    /// a USB/Bluetooth device. MacAudioOo plays through it, it is destroyed mid-playback (unplug), then recreated with the same
+    /// UID (replug). A recording runs across the whole sequence.
+    ///   MacAudioOo --hotplug-test report.txt
+    static func runHotplugTestIfRequested(state: AppState) {
+        guard let report = argValue("--hotplug-test") else { return }
+        let engine = state.engine, devices = state.devices
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacAudioOo-hotplug-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        state.recordingLibrary.setRoot(tempRoot)              // never write into the user's recordings folder
+        var out = "", ok = true
+        func line(_ s: String) { out += s + "\n" }
+        func check(_ c: Bool, _ m: String) { line((c ? "PASS " : "FAIL ") + m); if !c { ok = false } }
+        func after(_ s: Double, _ f: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + s, execute: f) }
+        func waitUntil(_ timeout: Double, _ cond: @escaping () -> Bool, _ then: @escaping (Bool, Double) -> Void) {
+            let start = Date()
+            func poll() {
+                if cond() { then(true, Date().timeIntervalSince(start)) }
+                else if Date().timeIntervalSince(start) > timeout { then(false, timeout) }
+                else { after(0.1, poll) }
+            }
+            poll()
+        }
+        let aggUID = "com.unupunct.MacAudioOo.test.unpluggable"
+        var aggID = AudioObjectID(0)
+        func makeAggregate(_ builtinUID: String) -> Bool {
+            let desc: [String: Any] = ["name": "MacAudioOo Test Output", "uid": aggUID, "master": builtinUID,
+                                       "subdevices": [["uid": builtinUID]], "private": 0, "stacked": 0]
+            return AudioHardwareCreateAggregateDevice(desc as CFDictionary, &aggID) == noErr
+        }
+        func finish() {
+            state.settings.outputDeviceUID = nil
+            if aggID != 0 { AudioHardwareDestroyAggregateDevice(aggID) }
+            line("result: \(ok ? "PASS" : "FAIL")")
+            try? out.write(toFile: report, atomically: true, encoding: .utf8)
+            NSApp.terminate(nil)
+        }
+
+        after(1.5) {
+            guard engine.status.isRunning, let builtin = devices.outputDevices.first(where: { $0.transport == "Built-in" }) else {
+                check(false, "engine running on a built-in output"); finish(); return
+            }
+            line("built-in output: \(builtin.name) (\(builtin.uid))")
+            let tone = engine.addChannel(name: "Hotplug tone", source: ToneSource(frequency: 523, amplitude: 0.05, sampleRate: Float(max(44100, engine.sampleRate))))
+            tone?.volumeDB = 0
+            check(makeAggregate(builtin.uid), "temporary output device created (stands in for a USB/Bluetooth device)")
+            waitUntil(6, { devices.outputDevices.contains { $0.uid == aggUID } }) { appeared, t in
+                check(appeared, String(format: "it appears in the output device list (%.1f s)", t))
+                guard appeared else { finish(); return }
+                state.settings.outputDeviceUID = aggUID
+                waitUntil(6, { engine.currentDeviceUID == aggUID && engine.status.isRunning }) { onAgg, t in
+                    check(onAgg, String(format: "engine switched to the chosen device (%.1f s)", t))
+                    let c0 = engine.callbackCount
+                    state.recorder.recordMix = true
+                    state.recorder.start()                       // records the mix across unplug and replug
+                    after(1.5) {
+                        check(engine.callbackCount > c0 + 20, "audio flows through the chosen device")
+                        // --- unplug
+                        let tUnplug = Date()
+                        AudioHardwareDestroyAggregateDevice(aggID); aggID = 0
+                        waitUntil(8, { engine.currentDeviceUID == builtin.uid && engine.status.isRunning }) { fell, t in
+                            check(fell, String(format: "after unplug the engine falls back to the built-in output (%.1f s)", Date().timeIntervalSince(tUnplug)))
+                            check(state.selectedOutputMissing, "the chosen device is reported as disconnected")
+                            let c1 = engine.callbackCount
+                            after(1.5) {
+                                check(engine.callbackCount > c1 + 20, "audio keeps flowing on the fallback device")
+                                // --- replug
+                                let tReplug = Date()
+                                _ = makeAggregate(builtin.uid)
+                                waitUntil(10, { engine.currentDeviceUID == aggUID && engine.status.isRunning }) { back, _ in
+                                    check(back, String(format: "after replug the engine returns to the chosen device by itself (%.1f s)", Date().timeIntervalSince(tReplug)))
+                                    let c2 = engine.callbackCount
+                                    after(1.5) {
+                                        check(engine.callbackCount > c2 + 20, "audio flows again after replug")
+                                        state.recorder.stop()
+                                        analyzeRecording()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        func analyzeRecording() {
+            if let e = state.recorder.lastError { line("recorder message: \(e)") }
+            guard let s = state.recordingLibrary.sessions.first, let t = s.info.tracks.first,
+                  let f = try? AVAudioFile(forReading: s.folder.appendingPathComponent(t.fileName)), f.length > 0,
+                  let buf = AVAudioPCMBuffer(pcmFormat: f.processingFormat, frameCapacity: AVAudioFrameCount(f.length)),
+                  (try? f.read(into: buf)) != nil, let d = buf.floatChannelData else { check(false, "recording across the hot-plug is readable"); finish(); return }
+            let n = Int(buf.frameLength), rate = f.processingFormat.sampleRate
+            let x = UnsafeBufferPointer(start: d[0], count: n)
+            // Longest run of digital silence = the audible gap caused by each device change.
+            var longest = 0, run = 0
+            for v in x { if abs(v) < 1e-5 { run += 1; longest = max(longest, run) } else { run = 0 } }
+            line(String(format: "recording: %.2f s, longest silent gap %.0f ms, dropped %d", Double(n) / rate, Double(longest) / rate * 1000, t.droppedFrames))
+            check(n > Int(rate * 3), "the recording continued across unplug and replug (\(String(format: "%.1f", Double(n) / rate)) s)")
+            check(Double(longest) / rate < 2.0, "the gap caused by a device change stays under 2 s")
+            check(t.droppedFrames == 0, "no frames dropped")
+            if let h = state.recordingLibrary.sessions.first { try? FileManager.default.trashItem(at: h.folder, resultingItemURL: nil) }
+            finish()
+        }
+    }
+
     /// Real applications through the real driver, end to end:
     ///   MacAudioOo --driver-test report.txt ready-file
     /// Sets the system output to the MacAudioOo driver, waits for two external players (started by the script once

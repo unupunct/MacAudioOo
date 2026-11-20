@@ -49,7 +49,19 @@ VLC (440 Hz) and IINA (660 Hz) playing at the same time through the driver. **Al
 - Stems are perfectly separated: VLC.wav holds 440 Hz at 0.120 and nothing at 660 Hz; IINA.wav holds 660 Hz at 0.079 and nothing at 440 Hz; 0 dropped frames. The system output was restored afterwards.
 - Notes: VLC ignores files passed at launch (`open -a`); the script loads them through VLC's AppleScript `open`, which starts playback.
 
-Not yet done with the driver: Safari/YouTube and Music (browser autoplay needs a user gesture; Spotify is not installed on the test Mac), device hot-plug, and a crash/force-quit.
+### Output-device hot-plug — `--hotplug-test` (macOS 12.7.6)
+
+A temporary output device (public aggregate-device API) stands in for a USB/Bluetooth device; MacAudioOo plays a tone through it while recording the mix. **All checks passed**: the device appears in the list (0.9 s); the engine switches to it (0.4 s); after the device is destroyed ("unplug") the engine falls back to the built-in output in 0.8 s, reports the chosen device as disconnected, and audio keeps flowing; after it is recreated ("replug") the engine returns to it by itself in 0.7 s; the recording ran straight through (5.7 s, longest silent gap 0 ms, 0 dropped frames). Real USB/Bluetooth hardware has not been tried.
+
+### Crash, force-quit and quit-the-captured-app — `scripts/driver-crashtest.sh` (driver installed, VLC capturing)
+
+**All checks passed** (the system output was restored to the built-in speakers afterwards):
+
+- **A.** With the opt-in *restore previous output on quit* setting on, a normal quit switched the system output back to the previous device.
+- **B.** MacAudioOo was killed with SIGKILL while VLC played into the driver: VLC kept running (the driver never hangs its clients); after relaunch MacAudioOo recovered VLC's channel with live audio. While MacAudioOo is dead the driver device is silent and the output stays on it until MacAudioOo returns or you pick another output (documented behaviour).
+- **C.** Quitting VLC while MacAudioOo captured it removed VLC's channel; MacAudioOo kept running normally.
+
+Not yet done with the driver: Safari/YouTube and Music (browser autoplay needs a user gesture; Spotify is not installed on the test Mac) and real USB/Bluetooth hardware.
 
 ## Acceptance tests 1 – 16
 
@@ -67,7 +79,7 @@ Not yet done with the driver: Safari/YouTube and Music (browser autoplay needs a
 | 10 | Record the stereo mix | Verified on hardware |
 | 11 | Load and play two local tracks in DJ | Verified: loaded on screen with real analysis; playback verified by offline render. Audible playback on the speakers not yet checked |
 | 12 | Crossfader | Verified (offline render: A only / B only / both) |
-| 13 | Disconnect/reconnect an output device | Implemented (falls back to the default, returns when the device returns); **not tested on hardware** |
-| 14 | Close an application with an active channel | Implemented (channel removed, recording finalized); **not tested with a real app** |
+| 13 | Disconnect/reconnect an output device | **Verified** with a temporary output device (fallback in 0.8 s, return in 0.7 s, recording uninterrupted); real USB/Bluetooth hardware not tried |
+| 14 | Close an application with an active channel | **Verified with VLC** (channel removed, MacAudioOo keeps running); also verified: force-quitting MacAudioOo and recovering |
 | 15 | OS compatibility | Detection verified by unit tests for 12/13/14.1/14.2/15; the app itself has only been run on 12.7.6 Intel |
 | 16 | Exported files playable and correct | Verified: re-read with AVFoundation (length, level, frequency). Playback through `AVAudioPlayer` on the speakers not yet checked |

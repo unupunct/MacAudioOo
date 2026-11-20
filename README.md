@@ -64,8 +64,9 @@ This is a working beta. What has actually been verified, and on what, is written
   the mix and stems from the live engine (re-read and checked), Console/Classic switching without interruption, DJ decks
   (offline render + on-screen), BPM analysis, the driver's shared-memory path (loaded like `coreaudiod` does, without installing) and then installed for real.
 - **Verified with the driver installed (macOS 12.7.6):** two real GUI apps (VLC and IINA) through the real `coreaudiod` appear as two channels named after the apps; per-app volume, mute, solo and separate stem recording work (`Documentation/TEST_RESULTS.md`).
-- **Not yet verified:** the driver with Safari, Music or Spotify; process taps on macOS 14.2+;
-  anything on macOS 13/14/15 or Apple silicon; output-device hot-plug on hardware.
+- **Also verified (macOS 12.7.6):** output-device unplug/replug (fallback 0.8 s, return 0.7 s, recording uninterrupted), force-quitting MacAudioOo (the captured app keeps running, the channel is recovered on relaunch), quitting a captured app, and restoring the previous output on quit.
+- **Not yet verified:** the driver with Safari, Music or Spotify; real USB/Bluetooth hardware; process taps on macOS 14.2+;
+  anything on macOS 13/14/15 or Apple silicon.
 
 ## Build
 

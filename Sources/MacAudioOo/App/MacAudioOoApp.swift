@@ -29,7 +29,12 @@ struct MacAudioOoApp: App {
                     SnapshotTool.runRecordTestIfRequested(state: state)
                     SnapshotTool.runOutputToolsIfRequested(state: state)
                     SnapshotTool.runDriverTestIfRequested(state: state)
+                    SnapshotTool.runProbeLogIfRequested(state: state)
+                    SnapshotTool.runQuitRestoreTestIfRequested(state: state)
+                    SnapshotTool.runHotplugTestIfRequested(state: state)
                     let devTool = CommandLine.arguments.contains("--snapshot") || CommandLine.arguments.contains("--switch-test")
+                        || CommandLine.arguments.contains("--probe-log") || CommandLine.arguments.contains("--quit-restore-test")
+                        || CommandLine.arguments.contains("--hotplug-test")
                         || CommandLine.arguments.contains("--record-test") || CommandLine.arguments.contains("--driver-test")
                         || CommandLine.arguments.contains("--query-output") || CommandLine.arguments.contains("--set-output")
                     if state.settings.startMinimized && !devTool {
