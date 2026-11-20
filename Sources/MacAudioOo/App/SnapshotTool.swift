@@ -134,8 +134,9 @@ enum SnapshotTool {
                 check(engine.currentDeviceUID == previous, "engine keeps playing through the real device (\(engine.currentDeviceUID ?? "?"))")
                 try? "go".write(toFile: ready, atomically: true, encoding: .utf8)
                 var waited = 0.0
+                let maxWait = Double(argValue("--driver-wait") ?? "25") ?? 25
                 func waitForChannels() {
-                    if engine.channels.count >= 2 || waited > 25 { channelsAppeared() } else { waited += 0.5; after(0.5, waitForChannels) }
+                    if engine.channels.count >= 2 || waited > maxWait { channelsAppeared() } else { waited += 0.5; after(0.5, waitForChannels) }
                 }
                 after(1.0, waitForChannels)
             }
@@ -145,6 +146,12 @@ enum SnapshotTool {
         func channelsAppeared() {
             line("channels: \(engine.channels.map { "\($0.name)[pid \($0.pid.map(String.init) ?? "-")]" })")
             check(engine.channels.count == 2, "two external players appear as two channels (\(engine.channels.count))")
+            if let expect = argValue("--driver-expect") {
+                for want in expect.split(separator: ",").map({ String($0) }) {
+                    check(engine.channels.contains { $0.name.localizedCaseInsensitiveContains(want) }, "a channel is named after the application \"\(want)\"")
+                }
+                line("channel icons present: \(engine.channels.map { $0.icon != nil })")
+            }
             guard engine.channels.count >= 2 else { finish(); return }
             let c0 = engine.channels[0], c1 = engine.channels[1]
             _ = peaks()
@@ -190,20 +197,30 @@ enum SnapshotTool {
                 state.recorder.stop()
                 if let e = state.recorder.lastError { line("recorder message: \(e)") }
                 guard let s = state.recordingLibrary.sessions.first else { check(false, "recording session found"); finish(); return }
-                var freqs: [Double] = []
+                /// Goertzel magnitude of `x` at `f` Hz (sample rate `rate`): how much of that tone the stem contains.
+                func goertzel(_ x: [Float], _ f: Double, _ rate: Double) -> Double {
+                    let w = 2 * Double.pi * f / rate, c = 2 * cos(w)
+                    var s1 = 0.0, s2 = 0.0
+                    for v in x { let s0 = Double(v) + c * s1 - s2; s2 = s1; s1 = s0 }
+                    return (s1 * s1 + s2 * s2 - c * s1 * s2).squareRoot() * 2 / Double(x.count)
+                }
+                var dominant: [String] = []
                 for t in s.info.tracks {
                     let url = s.folder.appendingPathComponent(t.fileName)
                     guard let f = try? AVAudioFile(forReading: url), f.length > 0,
                           let buf = AVAudioPCMBuffer(pcmFormat: f.processingFormat, frameCapacity: AVAudioFrameCount(f.length)),
                           (try? f.read(into: buf)) != nil, let d = buf.floatChannelData else { check(false, "\(t.fileName) readable"); continue }
-                    let n = Int(buf.frameLength); let mid = Array(UnsafeBufferPointer(start: d[0], count: n))[(n / 8)..<(n - n / 8)]
-                    var zc = 0; let a = Array(mid); for k in 1..<a.count where (a[k - 1] < 0) != (a[k] < 0) { zc += 1 }
-                    let hz = Double(zc) / 2 / (Double(a.count) / f.processingFormat.sampleRate)
+                    let n = Int(buf.frameLength); let a = Array(Array(UnsafeBufferPointer(start: d[0], count: n))[(n / 8)..<(n - n / 8)])
+                    let rate = f.processingFormat.sampleRate
+                    let m440 = goertzel(a, 440, rate), m660 = goertzel(a, 660, rate)
                     let pk = a.map { abs($0) }.max() ?? 0
-                    line(String(format: "%@: %.2f s  peak %.3f  ≈ %.0f Hz  dropped %d", t.fileName, Double(n) / 48000, pk, hz, t.droppedFrames))
-                    if !t.isMix { freqs.append(hz); check(pk > 0.05 && t.droppedFrames == 0, "\(t.fileName): real audio, nothing dropped") }
+                    line(String(format: "%@: %.2f s  peak %.3f  level@440 Hz %.3f  level@660 Hz %.3f  dropped %d", t.fileName, Double(n) / 48000, pk, m440, m660, t.droppedFrames))
+                    if !t.isMix {
+                        check(pk > 0.05 && t.droppedFrames == 0, "\(t.fileName): real audio, nothing dropped")
+                        dominant.append(m440 > m660 * 5 ? "440" : (m660 > m440 * 5 ? "660" : "mixed"))
+                    }
                 }
-                check(freqs.contains { abs($0 - 440) < 8 } && freqs.contains { abs($0 - 660) < 12 }, "stems carry the two separate source tones (440 Hz and 660 Hz)")
+                check(Set(dominant) == ["440", "660"], "each stem carries exactly one of the two source tones, no leakage (\(dominant))")
                 try? FileManager.default.removeItem(at: dir)
                 finish()
             }

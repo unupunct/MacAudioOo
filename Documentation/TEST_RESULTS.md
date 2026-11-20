@@ -40,13 +40,22 @@ mix through the Built-in Output. **All checks passed** and the previous system o
 - Found and fixed with the real driver: ten macOS system helpers (telephony, media-remote, AirPlay…) connect to the virtual device without
   ever playing; they showed up as empty channels. They are now hidden until they send audio (`scripts/driver-selftest.sh` covers this).
 
-Not yet done with the driver: a real GUI application (Safari/YouTube, Music, VLC, Spotify), device hot-plug, and a crash/force-quit.
+### Same test with two real GUI applications — `scripts/driver-realtest.sh gui`
+
+VLC (440 Hz) and IINA (660 Hz) playing at the same time through the driver. **All checks passed**:
+
+- Two channels named **"VLC"** and **"IINA"**, each with the application's real icon (attribution by bundle ID / process).
+- Per-app volume (−20.0 dB on one, 0.0 dB change on the other), mute and solo act on one application only.
+- Stems are perfectly separated: VLC.wav holds 440 Hz at 0.120 and nothing at 660 Hz; IINA.wav holds 660 Hz at 0.079 and nothing at 440 Hz; 0 dropped frames. The system output was restored afterwards.
+- Notes: VLC ignores files passed at launch (`open -a`); the script loads them through VLC's AppleScript `open`, which starts playback.
+
+Not yet done with the driver: Safari/YouTube and Music (browser autoplay needs a user gesture; Spotify is not installed on the test Mac), device hot-plug, and a crash/force-quit.
 
 ## Acceptance tests 1 – 16
 
 | # | Test | Status |
 |---|---|---|
-| 1 | Two applications at once | **Verified with two real processes** (`afplay`) through the real driver in `coreaudiod`; GUI apps such as Safari/Spotify not yet tried |
+| 1 | Two applications at once | **Verified with two real GUI applications** (VLC + IINA) and two command-line players through the real driver in `coreaudiod`; Safari/Music/Spotify not yet tried |
 | 2 | Lower A without changing B | **Verified with real processes** (A −20.0 dB, B 0.0 dB change) |
 | 3 | Mute A, B continues | **Verified with real processes** |
 | 4 | Solo B | **Verified with real processes** |
@@ -54,7 +63,7 @@ Not yet done with the driver: a real GUI application (Safari/YouTube, Music, VLC
 | 6 | Compression on one app | Verified (unit tests + gain-reduction meter on screen) |
 | 7 | Master volume | Verified on hardware |
 | 8 | Console ↔ Classic without interruption | Verified on hardware |
-| 9 | Record two apps to separate WAVs | **Verified with two real processes** (separate stems 444 / 666 Hz); GUI apps pending |
+| 9 | Record two apps to separate WAVs | **Verified with VLC and IINA** (separate stems, no leakage) |
 | 10 | Record the stereo mix | Verified on hardware |
 | 11 | Load and play two local tracks in DJ | Verified: loaded on screen with real analysis; playback verified by offline render. Audible playback on the speakers not yet checked |
 | 12 | Crossfader | Verified (offline render: A only / B only / both) |
