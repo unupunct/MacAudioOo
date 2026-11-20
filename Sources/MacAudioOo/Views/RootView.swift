@@ -11,8 +11,7 @@ struct RootView: View {
             Group {
                 switch settings.selectedTab {
                 case .settings: SettingsView()
-                case .console: NotImplementedView(tab: "CONSOLE", phase: "Phase 3",
-                    detail: "Channel strips, meters, EQ and compressor need the Phase 2 capture engine first.")
+                case .console: ConsoleView()
                 case .classic: NotImplementedView(tab: "CLASSIC", phase: "Phase 4",
                     detail: "The simplified mixer shares the Console engine and is built after it.")
                 case .recording: NotImplementedView(tab: "RECORDING", phase: "Phase 5",
@@ -37,13 +36,13 @@ struct TopBar: View {
         HStack(spacing: 14) {
             HStack(spacing: 6) {
                 Image(systemName: "waveform.circle.fill").font(.system(size: 20)).foregroundColor(Theme.accent)
-                Text("MacAudioOo").font(Theme.title).foregroundColor(Theme.textPrimary)
+                Text("MacAudioOo").font(Theme.title).foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
             }
             HStack(spacing: 2) {
                 ForEach(AppTab.allCases) { tab in
                     Button(action: { settings.selectedTab = tab }) {
-                        Text(tab.rawValue).font(Theme.label)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
+                        Text(tab.rawValue).font(Theme.label).lineLimit(1).fixedSize()
+                            .padding(.horizontal, 10).padding(.vertical, 6)
                             .foregroundColor(settings.selectedTab == tab ? .black : Theme.textSecondary)
                             .background(RoundedRectangle(cornerRadius: 5)
                                 .fill(settings.selectedTab == tab ? Theme.accent : Color.clear))
@@ -54,10 +53,10 @@ struct TopBar: View {
             EngineStatusPill()
             OutputPicker()
             HStack(spacing: 6) {
-                Text("MASTER").font(Theme.label).foregroundColor(Theme.textSecondary)
+                Text("MASTER").font(Theme.label).foregroundColor(Theme.textSecondary).lineLimit(1).fixedSize()
                 Slider(value: Binding(get: { Double(state.engine.masterVolumeDB) },
                                       set: { state.engine.masterVolumeDB = Float($0) }), in: -60...6)
-                    .frame(width: 110)
+                    .frame(width: 80)
                 Text(dbString(state.engine.masterVolumeDB)).font(Theme.value)
                     .foregroundColor(Theme.textPrimary).frame(width: 58, alignment: .trailing)
             }
@@ -73,7 +72,7 @@ struct EngineStatusPill: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(state.engine.status.isRunning ? Theme.meterGreen : Theme.meterOrange).frame(width: 8, height: 8)
-            Text(state.engineStatusText).font(Theme.label).foregroundColor(Theme.textPrimary)
+            Text(state.engineStatusText).font(Theme.label).foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Capsule().fill(Theme.well))
@@ -99,7 +98,7 @@ struct OutputPicker: View {
                     Text("Disconnected device").tag(uid)
                 }
             }
-            .labelsHidden().frame(width: 190)
+            .labelsHidden().frame(width: 150)
         }
         .help(state.selectedOutputMissing
               ? "The chosen output device is disconnected. MacAudioOo falls back to the system default and will not change it."

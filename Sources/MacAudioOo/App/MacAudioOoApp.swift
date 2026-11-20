@@ -11,7 +11,8 @@ struct MacAudioOoApp: App {
                 .environmentObject(state)
                 .environmentObject(state.settings)
                 .preferredColorScheme(state.settings.theme.colorScheme)
-                .frame(minWidth: 980, minHeight: 620)
+                .frame(minWidth: 1100, minHeight: 790)
+                .onAppear { SnapshotTool.runIfRequested(state: state) }
         }
         .commands {
             CommandMenu("View") {
