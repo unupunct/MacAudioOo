@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Combine
 
 /// Top-level observable state shared by every view.
@@ -105,8 +106,24 @@ final class AppState: ObservableObject {
             self?.refreshBackends()
         }.store(in: &bag)
 
+        // Remember the last real system output, so it can be restored (opt-in) when the app quits while the silent
+        // MacAudioOo driver device is selected.
+        settings.previousOutputUID = OutputRestorePolicy.remembered(current: settings.previousOutputUID,
+                                                                    newDefaultUID: devices.defaultOutputUID, driverUID: AudioDeviceManager.driverDeviceUID)
+        devices.$defaultOutputUID.receive(on: DispatchQueue.main).sink { [weak self] uid in
+            guard let self = self else { return }
+            let next = OutputRestorePolicy.remembered(current: self.settings.previousOutputUID, newDefaultUID: uid,
+                                                      driverUID: AudioDeviceManager.driverDeviceUID)
+            if next != self.settings.previousOutputUID { self.settings.previousOutputUID = next }
+        }.store(in: &bag)
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.restoreOutputIfEnabled()
+        }
+
         // Menu bar item, launch at login, ducking.
         let bar = MenuBarController(engine: engine)
+        bar.restoreTitle = { [weak self] in self?.restoreOutputTitle }
+        bar.onRestore = { [weak self] in self?.restoreOutputNow() }
         menuBar = bar
         settings.$menuBarEnabled.receive(on: DispatchQueue.main).sink { bar.setVisible($0) }.store(in: &bag)
         settings.$launchAtLogin.dropFirst().sink { on in
@@ -121,6 +138,33 @@ final class AppState: ObservableObject {
             guard let self = self else { return }
             for ch in self.engine.channels where ch.pid == pid { self.engine.removeChannel(ch) }
         }
+    }
+
+    // MARK: Leaving the silent driver device
+
+    /// Name of the device the system output would be switched back to, or nil if there is nothing to switch
+    /// (the system output is not the MacAudioOo driver device, or the previous device is unknown/unplugged).
+    var restoreOutputTitle: String? {
+        guard devices.systemDefaultIsDriver, let uid = settings.previousOutputUID, let d = devices.device(uid: uid) else { return nil }
+        return d.name
+    }
+
+    /// Explicit user action: set the system output back to the previous real device.
+    @discardableResult
+    func restoreOutputNow() -> Bool {
+        guard devices.systemDefaultIsDriver, let uid = settings.previousOutputUID else { return false }
+        let ok = devices.setDefaultOutput(uid: uid)
+        AppLog.shared.log(ok ? "System output switched back to the previous device (user request)" : "Could not switch the system output back")
+        return ok
+    }
+
+    /// Opt-in (Settings): on a normal quit, do the same so the Mac is not left on a device that is silent without the app.
+    func restoreOutputIfEnabled() {
+        guard let uid = OutputRestorePolicy.target(enabled: settings.restoreOutputOnQuit, defaultIsDriver: devices.systemDefaultIsDriver,
+                                                   previousUID: settings.previousOutputUID,
+                                                   availableUIDs: devices.outputDevices.map { $0.uid }) else { return }
+        let ok = devices.setDefaultOutput(uid: uid)
+        AppLog.shared.log(ok ? "Quit: system output restored to the previous device (setting enabled)" : "Quit: could not restore the system output")
     }
 
     /// The device the user chose, or the system default if none/unplugged.

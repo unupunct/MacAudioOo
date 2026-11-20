@@ -59,6 +59,23 @@ final class AudioDeviceManager: ObservableObject {
         defaultOutputUID = Self.defaultOutputDeviceID().flatMap { id in all.first { $0.id == id }?.uid }
     }
 
+    /// Sets the system default output (and system-sounds output) to the device with `uid`. Only ever called from an explicit
+    /// user action or an opt-in setting. Returns false if the device is gone or macOS refused.
+    @discardableResult
+    func setDefaultOutput(uid: String) -> Bool {
+        guard let dev = Self.allDevices().first(where: { $0.uid == uid && $0.outputChannels > 0 }) else { return false }
+        var id = dev.id
+        var ok = true
+        for selector in [kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultSystemOutputDevice] {
+            var addr = Self.address(selector)
+            let st = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
+                                                UInt32(MemoryLayout<AudioDeviceID>.size), &id)
+            if st != noErr { ok = false }
+        }
+        refresh()
+        return ok
+    }
+
     /// True when the system default output is the MacAudioOo virtual device.
     var systemDefaultIsDriver: Bool {
         guard let id = Self.defaultOutputDeviceID() else { return false }

@@ -11,6 +11,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let slider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private weak var engine: AudioEngine?
     private var bag = Set<AnyCancellable>()
+    private let restoreItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    /// Title for "switch the system output back" (nil hides the item) and the action behind it.
+    var restoreTitle: (() -> String?)?
+    var onRestore: (() -> Void)?
 
     init(engine: AudioEngine) {
         self.engine = engine
@@ -27,6 +31,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let sliderItem = NSMenuItem(); sliderItem.view = holder; menu.addItem(sliderItem)
         muteItem.target = self; muteItem.action = #selector(toggleMute); muteItem.keyEquivalentModifierMask = []
         menu.addItem(muteItem)
+        restoreItem.target = self; restoreItem.action = #selector(restoreOutput); restoreItem.isHidden = true
+        menu.addItem(restoreItem)
         menu.addItem(.separator())
         let open = NSMenuItem(title: "Open MacAudioOo", action: #selector(openApp), keyEquivalent: "o"); open.target = self; menu.addItem(open)
         let quit = NSMenuItem(title: "Quit MacAudioOo", action: #selector(quitApp), keyEquivalent: "q"); quit.target = self; menu.addItem(quit)
@@ -65,7 +71,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    func menuWillOpen(_ menu: NSMenu) { refresh() }
+    func menuWillOpen(_ menu: NSMenu) {
+        refresh()
+        if let name = restoreTitle?() { restoreItem.title = "Switch system output back to \(name)"; restoreItem.isHidden = false }
+        else { restoreItem.isHidden = true }
+    }
+    @objc private func restoreOutput() { onRestore?() }
 
     @objc private func sliderChanged(_ s: NSSlider) {
         engine?.masterVolumeDB = FaderTaper.db(forPosition: Float(s.doubleValue))

@@ -43,12 +43,17 @@ final class AppSettings: ObservableObject {
     @Published var libraryFolder: String? { didSet { defaults.set(libraryFolder, forKey: "libraryFolder") } }
     /// Only English is available; the setting exists so a language can be added without a settings migration.
     @Published var language: String { didSet { defaults.set(language, forKey: "language") } }
+    /// Opt-in: when MacAudioOo quits while the system output is the MacAudioOo virtual device, switch the system output
+    /// back to `previousOutputUID` (the real device used before). Off by default.
+    @Published var restoreOutputOnQuit: Bool { didSet { defaults.set(restoreOutputOnQuit, forKey: "restoreOutputOnQuit") } }
+    /// Last real (non-driver) system output seen while the app ran.
+    @Published var previousOutputUID: String? { didSet { defaults.set(previousOutputUID, forKey: "previousOutputUID") } }
     /// Requested audio I/O buffer size in frames (0 = device default).
     @Published var bufferFrames: Int { didSet { defaults.set(bufferFrames, forKey: "bufferFrames") } }
 
     static let keys = ["selectedTab", "defaultTab", "rememberLastTab", "theme", "startMinimized",
                        "menuBarEnabled", "outputDeviceUID", "recordingDirectory", "djFourDecks",
-                       "launchAtLogin", "bpmMin", "bpmMax", "djTempoRange", "libraryFolder", "language", "bufferFrames"]
+                       "launchAtLogin", "bpmMin", "bpmMax", "djTempoRange", "libraryFolder", "language", "bufferFrames", "restoreOutputOnQuit", "previousOutputUID"]
 
     static var defaultRecordingDirectory: String {
         (FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first?
@@ -75,6 +80,8 @@ final class AppSettings: ObservableObject {
         libraryFolder = defaults.string(forKey: "libraryFolder")
         language = defaults.string(forKey: "language") ?? "en"
         bufferFrames = defaults.integer(forKey: "bufferFrames")
+        restoreOutputOnQuit = defaults.bool(forKey: "restoreOutputOnQuit")
+        previousOutputUID = defaults.string(forKey: "previousOutputUID")
     }
 
     /// Settings as a JSON-friendly dictionary (for export).
@@ -96,7 +103,7 @@ final class AppSettings: ObservableObject {
         startMinimized = f.startMinimized; menuBarEnabled = f.menuBarEnabled; outputDeviceUID = f.outputDeviceUID
         recordingDirectory = f.recordingDirectory; djFourDecks = f.djFourDecks; launchAtLogin = f.launchAtLogin
         bpmMin = f.bpmMin; bpmMax = f.bpmMax; djTempoRange = f.djTempoRange; libraryFolder = f.libraryFolder; language = f.language
-        bufferFrames = f.bufferFrames
+        bufferFrames = f.bufferFrames; restoreOutputOnQuit = f.restoreOutputOnQuit; previousOutputUID = f.previousOutputUID
     }
 
     func resetToDefaults() {

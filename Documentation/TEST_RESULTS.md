@@ -4,7 +4,7 @@ Environment of every "verified" entry: MacBook Air 7,2 · Intel · **macOS 12.7.
 · Built-in Output · release (`-O`) build for anything audio-related. **Debug builds are not usable for audio**: the unoptimized
 render callback used 184 % of real time in the same test (the engine's health indicator reports "overloaded").
 
-## Automated tests — `scripts/test.sh` (75 tests, 0 failures)
+## Automated tests — `scripts/test.sh` (81 tests, 0 failures)
 
 Compatibility detection for macOS 12–15, settings persistence, mixer (volume, mute, solo, balance, smoothing, master, DIM, MONO,
 limiter ceiling, ring buffer), EQ (every band hits its gain ±0.5 dB, stability), compressor, reverb/delay stability, per-channel

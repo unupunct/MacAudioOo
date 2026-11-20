@@ -33,6 +33,11 @@ other applications. The driver is a standard macOS audio plug-in (no kernel exte
 3. In **System Settings > Sound > Output** choose **MacAudioOo Mixer**. MacAudioOo never changes this for you.
 4. Open MacAudioOo (Settings > Audio shows the driver status). Applications that play to the system output now appear as channels.
 
+**Getting your sound back.** In Settings > Audio (and in the menu bar item) there is a button to switch the system output back to
+the device you used before, and an opt-in setting, *"When MacAudioOo quits normally, switch the system output back to my previous
+device"* (off by default). MacAudioOo only changes the system output when you turn that on or press the button. A crash or
+force-quit cannot switch it back; open MacAudioOo again and use the button, or choose a device in Sound settings.
+
 Important behaviour: the driver itself makes no sound. **If MacAudioOo is not running, audio sent to "MacAudioOo Mixer" is
 silent.** Choose your normal output again in Sound settings if you quit the app for good. Applications that let you pick their
 own output device are only captured if you point them at "MacAudioOo Mixer". Hardware volume keys do not control the virtual

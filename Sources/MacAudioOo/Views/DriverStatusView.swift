@@ -6,6 +6,7 @@ import AppKit
 /// output device by itself.
 struct DriverStatusView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var settings: AppSettings
 
     var body: some View {
         let installed = FileManager.default.fileExists(atPath: CapabilityDetector.driverPath)
@@ -24,6 +25,18 @@ struct DriverStatusView: View {
             } else if loaded && !isDefault {
                 Text("To mix applications, choose \"MacAudioOo Mixer\" as the system output in Sound settings. MacAudioOo will not change this for you. Applications that keep their own output device selection are not captured.")
                     .font(.system(size: 11)).foregroundColor(Theme.textSecondary)
+            }
+            if installed || loaded {
+                Text("While \"MacAudioOo Mixer\" is the system output and MacAudioOo is not running, you hear nothing. A crash or force-quit cannot switch it back; the button below (or the menu bar item) can, once MacAudioOo runs again.")
+                    .font(.system(size: 11)).foregroundColor(Theme.meterYellow)
+                Toggle("When MacAudioOo quits normally, switch the system output back to my previous device",
+                       isOn: $settings.restoreOutputOnQuit)
+                    .help("Off by default. MacAudioOo only changes the system output when you turn this on or press the button.")
+                if let name = state.restoreOutputTitle {
+                    Button("Switch system output back to \(name) now") { state.restoreOutputNow() }
+                } else if isDefault {
+                    Text("Previous output unknown or unplugged: choose a device in Sound settings.").font(.system(size: 11)).foregroundColor(Theme.textSecondary)
+                }
             }
             HStack {
                 Button("Open Sound Settings") {

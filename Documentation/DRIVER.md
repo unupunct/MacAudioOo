@@ -24,6 +24,9 @@ separately installed **AudioServerPlugIn** (user-space HAL plug-in; no kernel ex
 - Only applications that use the system default output are captured. Apps that let you pick
   their own output device (some DJ/DAW apps, browsers with a per-site device) are not, unless
   you point them at "MacAudioOo Mixer".
+- After a crash or force-quit the system output stays on the (silent) driver device until you pick another output or reopen the
+  app and use "Switch system output back" (Settings > Audio, or the menu bar). A normal quit can do it automatically if you enable
+  *Restore previous output on quit*; it is off by default because MacAudioOo never changes your output without being asked.
 - Hardware volume keys do not control this virtual device; use MacAudioOo's master volume.
 - Added latency ≈ driver buffer + ~70 ms of ring fill (tunable, `targetFillFrames`).
 - Bluetooth/USB/HDMI outputs work as the *real* output because the app plays through them.
