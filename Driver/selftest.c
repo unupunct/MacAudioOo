@@ -61,8 +61,9 @@ int main(int argc, char** argv) {
     CHECK(i->GetPropertyData(drv, 3, 0, &a, 0, NULL, sizeof fmt, &sz, &fmt) == 0 && fmt.mChannelsPerFrame == 2 && fmt.mBitsPerChannel == 32, "stream format");
 
     // Two clients (two "applications").
-    AudioServerPlugInClientInfo c1 = { 101, 4001, false, CFSTR("com.example.appA") }, c2 = { 102, 4002, false, CFSTR("com.example.appB") };
-    CHECK(i->AddDeviceClient(drv, 2, &c1) == 0 && i->AddDeviceClient(drv, 2, &c2) == 0, "AddDeviceClient");
+    AudioServerPlugInClientInfo c1 = { 101, 4001, false, CFSTR("com.example.appA") }, c2 = { 102, 4002, false, CFSTR("com.example.appB") },
+                                c3 = { 103, 4003, false, CFSTR("com.apple.idlehelper") };   // connects but never plays (like macOS system helpers)
+    CHECK(i->AddDeviceClient(drv, 2, &c1) == 0 && i->AddDeviceClient(drv, 2, &c2) == 0 && i->AddDeviceClient(drv, 2, &c3) == 0, "AddDeviceClient");
     CHECK(i->StartIO(drv, 2, 101) == 0, "StartIO");
     Boolean will = 0, inPlace = 0;
     CHECK(i->WillDoIOOperation(drv, 2, 101, kAudioServerPlugInIOOperationProcessOutput, &will, &inPlace) == 0 && will, "WillDo ProcessOutput");
@@ -88,7 +89,7 @@ int main(int argc, char** argv) {
         double deadline = t0 + (double)(n + 1) * frames / sr, d = deadline - nowSec();
         if (d > 0) usleep((useconds_t)(d * 1e6));
     }
-    i->RemoveDeviceClient(drv, 2, &c1); i->RemoveDeviceClient(drv, 2, &c2);
+    i->RemoveDeviceClient(drv, 2, &c1); i->RemoveDeviceClient(drv, 2, &c2); i->RemoveDeviceClient(drv, 2, &c3);
     i->StopIO(drv, 2, 101);
     printf("SELFTEST DRIVER OK\n");
     return 0;

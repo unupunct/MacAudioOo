@@ -74,6 +74,8 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertNil(AppIdentityResolver.mainBundleID(fromHelper: "helper"))
         XCTAssertEqual(AppIdentityResolver.prettyName("com.apple.WebKit.GPU"), "WebKit GPU")
         XCTAssertEqual(AppIdentityResolver.prettyName("org.example.Thing"), "Thing")
+        XCTAssertEqual(AppIdentityResolver.prettyName("com.apple.assistantd"), "assistantd")
+        XCTAssertEqual(AppIdentityResolver.prettyName("com.apple.TelephonyUtilities.callservicesd"), "TelephonyUtilities callservicesd")
     }
 
     func testTheSystemResolverKnowsThisVeryProcess() {

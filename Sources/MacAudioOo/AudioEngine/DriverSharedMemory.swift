@@ -41,13 +41,15 @@ final class DriverSharedMemory {
         var index: Int, pid: Int32, clientID: UInt32, generation: UInt32, bundleID: String
     }
 
-    /// Currently active clients (one per application audio connection).
-    func activeSlots() -> [SlotInfo] {
+    /// Currently connected clients. macOS system helpers connect to every audio device they can see without ever
+    /// playing anything, so `requireAudio` keeps only clients that have written at least one frame (real playback).
+    func activeSlots(requireAudio: Bool = false) -> [SlotInfo] {
         var out: [SlotInfo] = []
         for i in 0..<Self.maxSlots {
             let o = slotOffset(i)
             OSMemoryBarrier()
             guard u32(o) != 0 else { continue }
+            if requireAudio, writeIndex(slot: i) == 0 { continue }
             let pid = base.load(fromByteOffset: o + 4, as: Int32.self)
             let bundle = (base + o + 32).withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) }
             out.append(SlotInfo(index: i, pid: pid, clientID: u32(o + 8), generation: u32(o + 12), bundleID: bundle))

@@ -22,6 +22,8 @@ final class VirtualDriverBackend: ObservableObject, AudioBackend {
     private var timer: Timer?
     private var manager: GroupedChannelManager?
     private var identityCache: [String: AppIdentity] = [:]
+    /// Clients that have started playing; once shown they stay (with their fader settings) until they disconnect.
+    private var shown = Set<String>()
     /// Overridable for tests (default: real process lookups).
     var resolverEnv: AppIdentityResolver.Env = .system
 
@@ -45,7 +47,7 @@ final class VirtualDriverBackend: ObservableObject, AudioBackend {
 
     func stop() {
         timer?.invalidate(); timer = nil
-        manager?.removeAll(); manager = nil; identityCache.removeAll()
+        manager?.removeAll(); manager = nil; identityCache.removeAll(); shown.removeAll()
         shm = nil; state = .stopped
     }
 
@@ -55,7 +57,15 @@ final class VirtualDriverBackend: ObservableObject, AudioBackend {
     func reconcile() {
         guard let shm = shm, let engine = engine, let manager = manager, engine.status.isRunning else { return }
         let me = ProcessInfo.processInfo.processIdentifier
-        let active = shm.activeSlots().filter { $0.pid != me }
+        // Idle system helpers (connected, never played) are ignored until they actually send audio.
+        let connected = shm.activeSlots().filter { $0.pid != me }
+        let active = connected.filter { s in
+            let key = "\(s.index)#\(s.generation)"
+            if shown.contains(key) { return true }
+            if shm.writeIndex(slot: s.index) > 0 { shown.insert(key); return true }
+            return false
+        }
+        shown = shown.filter { key in connected.contains { "\($0.index)#\($0.generation)" == key } }
 
         var desired: [String: GroupedChannelManager.Desired] = [:]
         var liveKeys = Set<String>()

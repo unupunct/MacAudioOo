@@ -73,11 +73,11 @@ enum AppIdentityResolver {
         return parts[..<i].joined(separator: ".")
     }
 
-    /// "com.apple.WebKit.GPU" -> "WebKit GPU" (last two components when they look like a product name, else the last one).
+    /// "com.apple.WebKit.GPU" -> "WebKit GPU"; "com.apple.assistantd" -> "assistantd"; "org.example.Thing" -> "Thing".
     static func prettyName(_ bundleID: String) -> String {
         let parts = bundleID.split(separator: ".").map(String.init)
         guard let last = parts.last else { return bundleID }
-        if parts.count >= 3, ["apple", "microsoft", "google"].contains(parts[1].lowercased()) { return parts.suffix(2).joined(separator: " ") }
+        if parts.count >= 4, ["apple", "microsoft", "google"].contains(parts[1].lowercased()) { return parts.suffix(2).joined(separator: " ") }
         return last
     }
 }

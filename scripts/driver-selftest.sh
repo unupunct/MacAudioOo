@@ -20,10 +20,11 @@ var shm: DriverSharedMemory? = nil
 for _ in 0..<60 { shm = DriverSharedMemory(name: name); if shm != nil { break }; usleep(50_000) }
 guard let shm = shm else { print("READER FAIL: shared memory not found"); exit(1) }
 var slots: [DriverSharedMemory.SlotInfo] = []
-for _ in 0..<60 { slots = shm.activeSlots(); if slots.count == 2 { break }; usleep(50_000) }
+for _ in 0..<60 { slots = shm.activeSlots(requireAudio: true); if slots.count == 2 { break }; usleep(50_000) }
 var failures = 0
 func check(_ ok: Bool, _ msg: String) { print((ok ? "PASS " : "FAIL ") + msg); if !ok { failures += 1 } }
-check(slots.count == 2, "two active clients seen (\(slots.count))")
+check(slots.count == 2, "two playing clients seen (\(slots.count))")
+check(shm.activeSlots().count == 3, "the idle helper is connected too (\(shm.activeSlots().count) clients) but filtered out while it plays nothing")
 check(Set(slots.map { $0.pid }) == [4001, 4002], "client PIDs 4001/4002")
 check(Set(slots.map { $0.bundleID }) == ["com.example.appA", "com.example.appB"], "bundle IDs")
 check(shm.sampleRate == 48000, "driver rate 48000")
