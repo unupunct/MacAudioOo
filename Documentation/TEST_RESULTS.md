@@ -4,7 +4,7 @@ Environment of every "verified" entry: MacBook Air 7,2 · Intel · **macOS 12.7.
 · Built-in Output · release (`-O`) build for anything audio-related. **Debug builds are not usable for audio**: the unoptimized
 render callback used 184 % of real time in the same test (the engine's health indicator reports "overloaded").
 
-## Automated tests — `scripts/test.sh` (81 tests, 0 failures)
+## Automated tests — `scripts/test.sh` (93 tests, 0 failures)
 
 Compatibility detection for macOS 12–15, settings persistence, mixer (volume, mute, solo, balance, smoothing, master, DIM, MONO,
 limiter ceiling, ring buffer), EQ (every band hits its gain ±0.5 dB, stability), compressor, reverb/delay stability, per-channel
@@ -13,7 +13,7 @@ meter ballistics, WAV writer (24-bit bytes, header, crash repair, 44.1→48 kHz 
 disk space), stem/mix taps (stems are dry and pre-fader), BPM detection (124/90/150/100 BPM, accents and off-beats, phase),
 beat grid, crossfader curves, waveform peaks, library (import, metadata, search, sort, favorites, playlists, persistence),
 DJ engine rendered offline (crossfader selects decks, gain/filter/EQ, key-lock keeps pitch, sync, hot cues, loops),
-ducking, launch-at-login plist, log, configuration export/import.
+application attribution (helper processes -> app) and one-channel-per-app grouping, output restore policy, ducking, launch-at-login plist, log, configuration export/import.
 
 ## Real-hardware checks
 
@@ -25,6 +25,7 @@ ducking, launch-at-login plist, log, configuration export/import.
 | `--record-test`: mix + 2 stems from the live engine for 4 s | 3 files of 4.01 s; stem A = dry 440 Hz at 0.300 (its −6 dB fader ignored, as designed); stem B = 1 kHz at 0.200; mix present; 0 dropped frames |
 | `--switch-test`: 7 Console↔Classic switches during playback | worst callback-rate deviation 2.1 % — audio not interrupted |
 | On-screen rendering of all six screens | screenshots in `docs/screenshots/` |
+| App attribution on this Mac: 9 helper processes of the running Chrome resolve (parent-process walk) to one application and one grouping key | pass (`AppIdentityResolver`); helpers whose parent is launchd fall back to the bundle ID the driver reports |
 
 ## Acceptance tests 1 – 16
 

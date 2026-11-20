@@ -9,7 +9,7 @@ separately installed **AudioServerPlugIn** (user-space HAL plug-in; no kernel ex
 - Every application that plays to it is a separate HAL *client*. The driver copies each
   client's audio into its own ring buffer in POSIX shared memory (`/MacAudioOo.mix`,
   layout in `Driver/MAOShared.h`).
-- The MacAudioOo app maps that memory read-only and turns each client into a mixer channel
+- The MacAudioOo app maps that memory read-only. Each client is attributed to its application (parent-process walk, helper bundle IDs, WebKit services -> Safari) and all clients of one application share ONE mixer channel, so a browser with many tabs is a single strip
   (independent volume, mute, solo, EQ …), then plays the mix to your real output device.
   The driver itself makes no sound: **if MacAudioOo is not running, audio sent to
   "MacAudioOo Mixer" is silent.**

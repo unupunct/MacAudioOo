@@ -12,7 +12,7 @@ final class VirtualDriverBackend: ObservableObject, AudioBackend {
     enum State: Equatable {
         case stopped
         case driverNotLoaded(String)
-        case running(clients: Int)
+        case running(clients: Int, apps: Int)
     }
 
     @Published private(set) var state: State = .stopped
@@ -20,7 +20,10 @@ final class VirtualDriverBackend: ObservableObject, AudioBackend {
     private weak var engine: AudioEngine?
     private var shm: DriverSharedMemory?
     private var timer: Timer?
-    private var channels: [Int: (generation: UInt32, channel: AudioChannel)] = [:]
+    private var manager: GroupedChannelManager?
+    private var identityCache: [String: AppIdentity] = [:]
+    /// Overridable for tests (default: real process lookups).
+    var resolverEnv: AppIdentityResolver.Env = .system
 
     init(capability: BackendCapability, engine: AudioEngine) {
         self.capability = capability; self.engine = engine
@@ -35,36 +38,42 @@ final class VirtualDriverBackend: ObservableObject, AudioBackend {
             return
         }
         self.shm = shm
+        if let e = engine { manager = GroupedChannelManager(engine: e) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.reconcile() }
         reconcile()
     }
 
     func stop() {
         timer?.invalidate(); timer = nil
-        if let e = engine { for (_, v) in channels { e.removeChannel(v.channel) } }
-        channels.removeAll(); shm = nil; state = .stopped
+        manager?.removeAll(); manager = nil; identityCache.removeAll()
+        shm = nil; state = .stopped
     }
 
     /// Public so tests and diagnostics can drive it deterministically.
+    /// Every driver client (one per audio connection of a process) is attributed to its application; all clients of
+    /// one application (browser helper processes, Electron renderers, …) share a single mixer channel.
     func reconcile() {
-        guard let shm = shm, let engine = engine, engine.status.isRunning else { return }
+        guard let shm = shm, let engine = engine, let manager = manager, engine.status.isRunning else { return }
         let me = ProcessInfo.processInfo.processIdentifier
         let active = shm.activeSlots().filter { $0.pid != me }
-        let activeIdx = Set(active.map { $0.index })
 
-        for (idx, v) in channels where !activeIdx.contains(idx) {
-            engine.removeChannel(v.channel); channels[idx] = nil
-        }
+        var desired: [String: GroupedChannelManager.Desired] = [:]
+        var liveKeys = Set<String>()
         for s in active {
-            if let existing = channels[s.index], existing.generation == s.generation { continue }
-            if let old = channels[s.index] { engine.removeChannel(old.channel) }   // slot reused by a new client
-            let app = NSRunningApplication(processIdentifier: s.pid)
-            let name = app?.localizedName ?? (s.bundleID.isEmpty ? "Process \(s.pid)" : s.bundleID)
-            let src = DriverSlotSource(shm: shm, slot: s.index, outputRate: engine.sampleRate)
-            if let ch = engine.addChannel(name: name, pid: s.pid, icon: app?.icon, source: src) {
-                channels[s.index] = (s.generation, ch)
+            let slotKey = "\(s.index)#\(s.generation)"
+            liveKeys.insert(slotKey)
+            let identity: AppIdentity
+            if let cached = identityCache[slotKey] { identity = cached } else {
+                identity = AppIdentityResolver.resolve(pid: s.pid, bundleHint: s.bundleID.isEmpty ? nil : s.bundleID, env: resolverEnv)
+                identityCache[slotKey] = identity
             }
+            var d = desired[identity.key] ?? GroupedChannelManager.Desired(identity: identity, members: [])
+            let index = s.index, rate = engine.sampleRate
+            d.members.append((id: slotKey, make: { DriverSlotSource(shm: shm, slot: index, outputRate: rate) }))
+            desired[identity.key] = d
         }
-        state = .running(clients: channels.count)
+        identityCache = identityCache.filter { liveKeys.contains($0.key) }
+        manager.reconcile(desired)
+        state = .running(clients: active.count, apps: manager.channelCount)
     }
 }

@@ -146,16 +146,20 @@ enum TapError: Error, CustomStringConvertible {
     }
 }
 
-/// Discovers applications that are producing audio (Core Audio process objects) and gives each one a mixer
-/// channel fed by its own tap. The application's own output is muted while tapped, so the mixer is the only
-/// path to the speakers; if MacAudioOo quits, taps disappear with it and the applications sound normally again.
+/// Discovers audio processes that are producing sound (Core Audio process objects) and taps each one. Processes are
+/// attributed to their application (a browser's helper processes, an Electron app's renderers, …) and all of an
+/// application's taps share ONE mixer channel. The application's own output is muted while tapped, so the mixer is the
+/// only path to the speakers; if MacAudioOo quits, taps disappear with it and the applications sound normally again.
 final class CoreAudioTapBackend: ObservableObject, AudioBackend {
     enum State: Equatable { case stopped, running(taps: Int), failed(String), unavailable(String) }
     @Published private(set) var state: State = .stopped
     let capability: BackendCapability
     private weak var engine: AudioEngine?
     private var timer: Timer?
-    private var taps: [AudioObjectID: (tap: ProcessTap, channel: AudioChannel, idleSince: Date?)] = [:]
+    private struct Entry { var tap: ProcessTap; var pid: pid_t; var bundle: String?; var idleSince: Date? }
+    private var taps: [AudioObjectID: Entry] = [:]
+    private var identities: [AudioObjectID: AppIdentity] = [:]
+    private var manager: GroupedChannelManager?
     private var failedObjects = Set<AudioObjectID>()
 
     init(capability: BackendCapability, engine: AudioEngine) { self.capability = capability; self.engine = engine }
@@ -165,26 +169,26 @@ final class CoreAudioTapBackend: ObservableObject, AudioBackend {
         guard OSVersion.current >= OSVersion(major: 14, minor: 2, patch: 0), Tap.symbol("AudioHardwareCreateProcessTap", as: Tap.CreateTap.self) != nil else {
             state = .unavailable("Requires macOS 14.2 or later."); return
         }
+        if let e = engine { manager = GroupedChannelManager(engine: e) }
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.poll() }
         poll()
     }
 
     func stop() {
         timer?.invalidate(); timer = nil
-        if let e = engine { for (_, v) in taps { e.removeChannel(v.channel) } }
+        manager?.removeAll(); manager = nil
         for (_, v) in taps { v.tap.stop() }
-        taps.removeAll(); failedObjects.removeAll()
+        taps.removeAll(); identities.removeAll(); failedObjects.removeAll()
         if state != .unavailable("Requires macOS 14.2 or later.") { state = .stopped }
     }
 
     // MARK: Polling (1 Hz: the process list has no change notification we can rely on)
 
     private func poll() {
-        guard let engine = engine, engine.status.isRunning, let uid = engine.currentDeviceUID else { return }
+        guard let engine = engine, let manager = manager, engine.status.isRunning, let uid = engine.currentDeviceUID else { return }
         let me = ProcessInfo.processInfo.processIdentifier
-        let objects = Self.processObjects()
         var seen = Set<AudioObjectID>()
-        for obj in objects {
+        for obj in Self.processObjects() {
             guard let pid = Self.readPID(obj), pid != me else { continue }
             seen.insert(obj)
             let outputting = Self.readBool(obj, Tap.processRunningOutput)
@@ -197,25 +201,31 @@ final class CoreAudioTapBackend: ObservableObject, AudioBackend {
             let tap = ProcessTap(processObject: obj, pid: pid)
             do {
                 try tap.start(outputDeviceUID: uid, muteOriginal: true)
-                let app = NSRunningApplication(processIdentifier: pid)
-                let bundle = Self.readString(obj, Tap.processBundleID)
-                let name = app?.localizedName ?? bundle ?? "Process \(pid)"
-                let src = RingResamplerSource(ring: tap.ring, sourceRate: tap.sampleRate, outputRate: engine.sampleRate)
-                if let ch = engine.addChannel(name: name, pid: pid, icon: app?.icon, source: src) {
-                    taps[obj] = (tap, ch, nil)
-                } else { tap.stop() }
+                taps[obj] = Entry(tap: tap, pid: pid, bundle: Self.readString(obj, Tap.processBundleID), idleSince: nil)
             } catch {
                 tap.stop(); failedObjects.insert(obj)
                 state = .failed("\(error)"); AppLog.shared.log("Tap for pid \(pid) failed: \(error)")
             }
         }
-        // Remove taps whose process is gone or silent for 5 s (un-muting the application again).
+        // Drop taps whose process is gone or silent for 5 s (this un-mutes that process again).
         for (obj, v) in taps where !seen.contains(obj) || (v.idleSince.map { Date().timeIntervalSince($0) > 5 } ?? false) {
-            engine.removeChannel(v.channel); v.tap.stop(); taps[obj] = nil
+            v.tap.stop(); taps[obj] = nil; identities[obj] = nil
         }
         failedObjects.formIntersection(seen)
-        if case .failed = state, taps.isEmpty == false { state = .running(taps: taps.count) }
-        else if case .failed = state {} else { state = .running(taps: taps.count) }
+
+        // One channel per application.
+        var desired: [String: GroupedChannelManager.Desired] = [:]
+        for (obj, v) in taps {
+            let identity = identities[obj] ?? AppIdentityResolver.resolve(pid: v.pid, bundleHint: v.bundle)
+            identities[obj] = identity
+            var d = desired[identity.key] ?? GroupedChannelManager.Desired(identity: identity, members: [])
+            let ring = v.tap.ring, rate = v.tap.sampleRate, out = engine.sampleRate
+            d.members.append((id: "\(obj)", make: { RingResamplerSource(ring: ring, sourceRate: rate, outputRate: out) }))
+            desired[identity.key] = d
+        }
+        manager.reconcile(desired)
+        if case .failed = state, taps.isEmpty { return }          // keep showing the failure until something works
+        state = .running(taps: taps.count)
     }
 
     // MARK: Property helpers

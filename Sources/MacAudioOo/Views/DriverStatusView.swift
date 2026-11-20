@@ -52,7 +52,8 @@ struct DriverStatusView: View {
         switch b.state {
         case .stopped: return "Backend: stopped."
         case .driverNotLoaded(let why): return "Backend: " + why
-        case .running(let n): return "Backend: running, \(n) application client\(n == 1 ? "" : "s") connected."
+        case .running(let clients, let apps):
+            return "Backend: running, \(apps) application\(apps == 1 ? "" : "s") (\(clients) audio connection\(clients == 1 ? "" : "s"))."
         }
     }
 
