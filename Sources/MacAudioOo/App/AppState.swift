@@ -5,6 +5,8 @@ import Combine
 final class AppState: ObservableObject {
     let settings = AppSettings()
     let devices = AudioDeviceManager()
+    let engine = AudioEngine()
+    let processes = AudioProcessManager()
     let capabilities: [BackendCapability]
     let preferredBackend: BackendCapability?
     private var bag = Set<AnyCancellable>()
@@ -15,6 +17,28 @@ final class AppState: ObservableObject {
         // Forward child changes so views observing AppState refresh.
         settings.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         devices.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        engine.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+
+        // Follow output-device choice and hot-plug/default changes.
+        engine.selectOutput(uid: settings.outputDeviceUID, devices: devices)
+        settings.$outputDeviceUID.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] uid in
+            guard let self = self else { return }
+            self.engine.selectOutput(uid: uid, devices: self.devices)
+        }.store(in: &bag)
+        devices.$outputDevices.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self = self else { return }
+            self.engine.reconcile(devices: self.devices)
+        }.store(in: &bag)
+        devices.$defaultOutputUID.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self = self else { return }
+            self.engine.reconcile(devices: self.devices)
+        }.store(in: &bag)
+
+        // Tear down a channel when its application quits.
+        processes.onTerminate = { [weak self] pid in
+            guard let self = self else { return }
+            for ch in self.engine.channels where ch.pid == pid { self.engine.removeChannel(ch) }
+        }
     }
 
     /// The device the user chose, or the system default if none/unplugged.
@@ -26,17 +50,24 @@ final class AppState: ObservableObject {
         settings.outputDeviceUID != nil && devices.device(uid: settings.outputDeviceUID) == nil
     }
 
-    enum EngineStatus {
-        case stopped(reason: String)
-        var text: String { switch self { case .stopped: return "ENGINE STOPPED" } }
-        var detail: String { switch self { case .stopped(let r): return r } }
+    var engineStatusText: String {
+        switch engine.status {
+        case .running: return "ENGINE RUNNING"
+        case .stopped: return "ENGINE STOPPED"
+        case .failed: return "ENGINE ERROR"
+        }
     }
 
-    /// Phase 1: no capture engine exists yet, so status is honestly "stopped".
-    var engineStatus: EngineStatus {
-        if let b = preferredBackend {
-            return .stopped(reason: "Backend ready: \(b.kind.rawValue). Capture engine arrives in Phase 2.")
+    var engineStatusDetail: String {
+        switch engine.status {
+        case .running(let d, let r):
+            var s = "Output: \(d) @ \(Int(r)) Hz."
+            if preferredBackend == nil {
+                s += " No app-capture backend on macOS \(OSVersion.current.description); only generated test signals can be mixed."
+            }
+            return s
+        case .stopped: return "The audio engine is not running."
+        case .failed(let m): return m
         }
-        return .stopped(reason: "No per-app mixing backend available on macOS \(OSVersion.current.description). See Settings ▸ Audio.")
     }
 }

@@ -52,6 +52,8 @@ struct SettingsView: View {
                     Toggle("Default to four-deck layout", isOn: $settings.djFourDecks)
                 }
                 section("ADVANCED") {
+                    DiagnosticsView()
+                    Divider().overlay(Theme.border)
                     Button("Reset all settings…") { confirmReset = true }
                     note("Diagnostics, logs and config import/export are planned.")
                 }

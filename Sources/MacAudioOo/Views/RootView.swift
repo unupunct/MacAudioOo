@@ -53,11 +53,15 @@ struct TopBar: View {
             Spacer()
             EngineStatusPill()
             OutputPicker()
-            VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
                 Text("MASTER").font(Theme.label).foregroundColor(Theme.textSecondary)
-                Text("n/a until engine runs").font(.system(size: 9)).foregroundColor(Theme.textSecondary)
+                Slider(value: Binding(get: { Double(state.engine.masterVolumeDB) },
+                                      set: { state.engine.masterVolumeDB = Float($0) }), in: -60...6)
+                    .frame(width: 110)
+                Text(dbString(state.engine.masterVolumeDB)).font(Theme.value)
+                    .foregroundColor(Theme.textPrimary).frame(width: 58, alignment: .trailing)
             }
-            .help("Master volume becomes active when the audio engine is running (Phase 2).")
+            .help("Master output volume (-∞ to +6 dB). Smoothed in the real-time mixer.")
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Theme.panel)
@@ -68,13 +72,13 @@ struct EngineStatusPill: View {
     @EnvironmentObject var state: AppState
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(Theme.meterOrange).frame(width: 8, height: 8)
-            Text(state.engineStatus.text).font(Theme.label).foregroundColor(Theme.textPrimary)
+            Circle().fill(state.engine.status.isRunning ? Theme.meterGreen : Theme.meterOrange).frame(width: 8, height: 8)
+            Text(state.engineStatusText).font(Theme.label).foregroundColor(Theme.textPrimary)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Capsule().fill(Theme.well))
         .overlay(Capsule().stroke(Theme.border))
-        .help(state.engineStatus.detail)
+        .help(state.engineStatusDetail)
     }
 }
 
