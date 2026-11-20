@@ -27,8 +27,11 @@ struct MacAudioOoApp: App {
                     SnapshotTool.runIfRequested(state: state)
                     SnapshotTool.runSwitchTestIfRequested(state: state)
                     SnapshotTool.runRecordTestIfRequested(state: state)
+                    SnapshotTool.runOutputToolsIfRequested(state: state)
+                    SnapshotTool.runDriverTestIfRequested(state: state)
                     let devTool = CommandLine.arguments.contains("--snapshot") || CommandLine.arguments.contains("--switch-test")
-                        || CommandLine.arguments.contains("--record-test")
+                        || CommandLine.arguments.contains("--record-test") || CommandLine.arguments.contains("--driver-test")
+                        || CommandLine.arguments.contains("--query-output") || CommandLine.arguments.contains("--set-output")
                     if state.settings.startMinimized && !devTool {
                         DispatchQueue.main.async { NSApp.windows.first(where: { $0.canBecomeMain })?.miniaturize(nil) }
                     }

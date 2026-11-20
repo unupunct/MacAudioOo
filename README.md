@@ -60,10 +60,11 @@ Until a build is signed with a Developer ID and notarized, macOS will warn on fi
 This is a working beta. What has actually been verified, and on what, is written down in
 [Documentation/TEST_RESULTS.md](Documentation/TEST_RESULTS.md) — read it before relying on anything:
 
-- Verified on a MacBook Air (Intel, **macOS 12.7.6**): 93 automated tests, real-time engine on the built-in output, recording of
+- Verified on a MacBook Air (Intel, **macOS 12.7.6**): 95 automated tests, real-time engine on the built-in output, recording of
   the mix and stems from the live engine (re-read and checked), Console/Classic switching without interruption, DJ decks
-  (offline render + on-screen), BPM analysis, the driver's shared-memory path (loaded like `coreaudiod` does, without installing).
-- **Not yet verified:** the driver inside the real `coreaudiod` with real applications; process taps on macOS 14.2+;
+  (offline render + on-screen), BPM analysis, the driver's shared-memory path (loaded like `coreaudiod` does, without installing) and then installed for real.
+- **Verified with the driver installed (macOS 12.7.6):** two real processes through the real `coreaudiod` appear as two channels; per-app volume, mute, solo and separate stem recording work (`Documentation/TEST_RESULTS.md`).
+- **Not yet verified:** the driver with real GUI applications (Safari, Spotify…); process taps on macOS 14.2+;
   anything on macOS 13/14/15 or Apple silicon; output-device hot-plug on hardware.
 
 ## Build
@@ -72,7 +73,7 @@ Needs only the macOS Command Line Tools:
 
 ```bash
 scripts/build.sh release            # build/MacAudioOo.app
-scripts/test.sh                     # 93 unit tests
+scripts/test.sh                     # 95 unit tests
 scripts/package.sh all              # both DMGs into dist/
 ```
 

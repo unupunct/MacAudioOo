@@ -54,5 +54,4 @@ running Monterey additionally require a valid signature to load the plug-in.
 `scripts/driver-selftest.sh` needs no root and installs nothing: it loads the built driver the way
 coreaudiod does, plays two tones as two fake applications, and checks through the app's real
 shared-memory reader and mixer that each is an independent stream.
-**Status:** passes on macOS 12.7.6 / Intel. **Not yet verified:** loading inside the real
-`coreaudiod`, real applications playing to the device, device hot-plug while the driver is active.
+**Status:** the driver is installed and verified in the real `coreaudiod` on macOS 12.7.6 / Intel with two real processes (see TEST_RESULTS.md). **Not yet verified:** real GUI applications, device hot-plug while the driver is active, Apple silicon.

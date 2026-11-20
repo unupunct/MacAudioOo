@@ -82,6 +82,134 @@ enum SnapshotTool {
         }
     }
 
+    // MARK: Real-driver test (used by scripts/driver-realtest.sh; changes the system output only on explicit request)
+
+    /// `--query-output file` writes the current default output UID; `--set-output <uid|driver>` sets it and quits.
+    static func runOutputToolsIfRequested(state: AppState) {
+        if let f = argValue("--query-output") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                try? (state.devices.defaultOutputUID ?? "").write(toFile: f, atomically: true, encoding: .utf8)
+                NSApp.terminate(nil)
+            }
+        }
+        if let uid = argValue("--set-output") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let target = uid == "driver" ? AudioDeviceManager.driverDeviceUID : uid
+                let ok = state.devices.setDefaultOutput(uid: target)
+                AppLog.shared.log("--set-output \(target): \(ok)")
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    /// Real applications through the real driver, end to end:
+    ///   MacAudioOo --driver-test report.txt ready-file
+    /// Sets the system output to the MacAudioOo driver, waits for two external players (started by the script once
+    /// `ready-file` exists) to appear as two channels, checks volume/mute/solo independence on the live meters, records
+    /// the stems, and restores the previous output. Only runs when explicitly invoked.
+    static func runDriverTestIfRequested(state: AppState) {
+        guard let report = argValue("--driver-test"), let ready = argValue("--driver-ready") else { return }
+        let engine = state.engine
+        var out = ""
+        var ok = true
+        func line(_ s: String) { out += s + "\n" }
+        func check(_ cond: Bool, _ msg: String) { line((cond ? "PASS " : "FAIL ") + msg); if !cond { ok = false } }
+        func after(_ s: Double, _ f: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + s, execute: f) }
+        let previous = state.devices.defaultOutputUID
+        func finish() {
+            if let p = previous, state.devices.systemDefaultIsDriver { state.devices.setDefaultOutput(uid: p) }
+            line("system output restored to previous device: \(state.devices.defaultOutputUID == previous)")
+            line("result: \(ok ? "PASS" : "FAIL")")
+            try? out.write(toFile: report, atomically: true, encoding: .utf8)
+            NSApp.terminate(nil)
+        }
+
+        after(1.5) {
+            line("previous system output UID: \(previous ?? "none")")
+            check(state.devices.driverDeviceLoaded, "driver device loaded by macOS")
+            guard state.devices.driverDeviceLoaded, engine.status.isRunning else { finish(); return }
+            check(state.devices.setDefaultOutput(uid: AudioDeviceManager.driverDeviceUID), "system output set to MacAudioOo Mixer")
+            after(1.0) {
+                check(state.devices.systemDefaultIsDriver, "system default is now the driver device")
+                check(engine.currentDeviceUID == previous, "engine keeps playing through the real device (\(engine.currentDeviceUID ?? "?"))")
+                try? "go".write(toFile: ready, atomically: true, encoding: .utf8)
+                var waited = 0.0
+                func waitForChannels() {
+                    if engine.channels.count >= 2 || waited > 25 { channelsAppeared() } else { waited += 0.5; after(0.5, waitForChannels) }
+                }
+                after(1.0, waitForChannels)
+            }
+        }
+
+        func peaks() -> [Float] { engine.channels.map { $0.readMeter().peakDB } }
+        func channelsAppeared() {
+            line("channels: \(engine.channels.map { "\($0.name)[pid \($0.pid.map(String.init) ?? "-")]" })")
+            check(engine.channels.count == 2, "two external players appear as two channels (\(engine.channels.count))")
+            guard engine.channels.count >= 2 else { finish(); return }
+            let c0 = engine.channels[0], c1 = engine.channels[1]
+            _ = peaks()
+            after(1.0) {
+                let base = peaks()
+                line("peaks (dB): \(base.map { String(format: "%.1f", $0) })")
+                check(base.allSatisfy { $0 > -40 }, "both channels carry real audio")
+                c0.volumeDB = -20
+                after(1.2) {
+                    _ = peaks(); after(1.0) {
+                        let p = peaks()
+                        check(abs((base[0] - p[0]) - 20) < 3, String(format: "lowering channel 1 by 20 dB drops its meter by %.1f dB", base[0] - p[0]))
+                        check(abs(base[1] - p[1]) < 1.5, String(format: "channel 2 unchanged (%.1f dB change)", base[1] - p[1]))
+                        c0.volumeDB = 0; c1.mute = true
+                        after(1.2) {
+                            _ = peaks(); after(0.8) {
+                                let m = peaks()
+                                check(m[1] < -80, String(format: "muting channel 2 silences it (%.1f dB)", m[1]))
+                                check(abs(m[0] - base[0]) < 2, String(format: "channel 1 keeps playing at its level (%.1f dB)", m[0]))
+                                c1.mute = false; c0.solo = true
+                                after(1.2) {
+                                    _ = peaks(); after(0.8) {
+                                        let s = peaks()
+                                        check(s[1] < -80 && s[0] > -40, "solo channel 1 silences channel 2")
+                                        c0.solo = false
+                                        recordStems()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        func recordStems() {
+            for c in engine.channels { c.recArm = true }
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("MacAudioOo-driver-test-\(UUID().uuidString)")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            state.recordingLibrary.setRoot(dir)
+            state.recorder.start()
+            after(3.0) {
+                state.recorder.stop()
+                if let e = state.recorder.lastError { line("recorder message: \(e)") }
+                guard let s = state.recordingLibrary.sessions.first else { check(false, "recording session found"); finish(); return }
+                var freqs: [Double] = []
+                for t in s.info.tracks {
+                    let url = s.folder.appendingPathComponent(t.fileName)
+                    guard let f = try? AVAudioFile(forReading: url), f.length > 0,
+                          let buf = AVAudioPCMBuffer(pcmFormat: f.processingFormat, frameCapacity: AVAudioFrameCount(f.length)),
+                          (try? f.read(into: buf)) != nil, let d = buf.floatChannelData else { check(false, "\(t.fileName) readable"); continue }
+                    let n = Int(buf.frameLength); let mid = Array(UnsafeBufferPointer(start: d[0], count: n))[(n / 8)..<(n - n / 8)]
+                    var zc = 0; let a = Array(mid); for k in 1..<a.count where (a[k - 1] < 0) != (a[k] < 0) { zc += 1 }
+                    let hz = Double(zc) / 2 / (Double(a.count) / f.processingFormat.sampleRate)
+                    let pk = a.map { abs($0) }.max() ?? 0
+                    line(String(format: "%@: %.2f s  peak %.3f  ≈ %.0f Hz  dropped %d", t.fileName, Double(n) / 48000, pk, hz, t.droppedFrames))
+                    if !t.isMix { freqs.append(hz); check(pk > 0.05 && t.droppedFrames == 0, "\(t.fileName): real audio, nothing dropped") }
+                }
+                check(freqs.contains { abs($0 - 440) < 8 } && freqs.contains { abs($0 - 660) < 12 }, "stems carry the two separate source tones (440 Hz and 660 Hz)")
+                try? FileManager.default.removeItem(at: dir)
+                finish()
+            }
+        }
+    }
+
     /// Acceptance tests 9, 10 and 16 on real hardware: record the stereo mix and two armed stems from the running
     /// engine, then read the files back and check length, level and frequency.
     ///   MacAudioOo --record-test result.txt [--keep]

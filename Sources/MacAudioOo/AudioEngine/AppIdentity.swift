@@ -29,6 +29,8 @@ enum AppIdentityResolver {
         var regularApp: (pid_t) -> (name: String, bundleID: String?)?
         var runningApp: (String) -> (name: String, bundleID: String?, pid: pid_t)?
         var icon: (pid_t?) -> NSImage? = { _ in nil }
+        /// Executable name of the process (e.g. "afplay"), used when there is no application or bundle ID to name it by.
+        var processName: (pid_t) -> String? = { _ in nil }
     }
 
     /// Bundle-ID prefixes of system service families and the application they are attributed to when it is running.
@@ -63,7 +65,7 @@ enum AppIdentityResolver {
             let base = mainBundleID(fromHelper: hint) ?? hint
             return AppIdentity(key: base, name: prettyName(base), bundleID: base, mainPID: nil, icon: nil)
         }
-        return AppIdentity(key: "pid:\(pid)", name: "Process \(pid)", bundleID: nil, mainPID: nil, icon: nil)
+        return AppIdentity(key: "pid:\(pid)", name: env.processName(pid) ?? "Process \(pid)", bundleID: nil, mainPID: nil, icon: nil)
     }
 
     /// "com.hnc.Discord.helper.Renderer" -> "com.hnc.Discord"; "com.google.Chrome.helper" -> "com.google.Chrome"; otherwise nil.
@@ -101,5 +103,14 @@ extension AppIdentityResolver.Env {
             NSRunningApplication.runningApplications(withBundleIdentifier: bid).first { $0.activationPolicy == .regular }
                 .map { ($0.localizedName ?? bid, $0.bundleIdentifier, $0.processIdentifier) }
         },
-        icon: { pid in pid.flatMap { NSRunningApplication(processIdentifier: $0)?.icon } })
+        icon: { pid in pid.flatMap { NSRunningApplication(processIdentifier: $0)?.icon } },
+        processName: { pid in
+            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+            var info = kinfo_proc()
+            var size = MemoryLayout<kinfo_proc>.stride
+            guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+            let chars = Mirror(reflecting: info.kp_proc.p_comm).children.compactMap { $0.value as? Int8 }.prefix { $0 != 0 }
+            let name = String(chars.map { Character(UnicodeScalar(UInt8(bitPattern: $0))) })
+            return name.isEmpty ? nil : name
+        })
 }

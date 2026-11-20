@@ -8,10 +8,12 @@ final class AppIdentityTests: XCTestCase {
         var parents: [pid_t: pid_t] = [:]
         var regular: [pid_t: (String, String?)] = [:]
         var running: [String: (String, String?, pid_t)] = [:]
+        var names: [pid_t: String] = [:]
         var env: AppIdentityResolver.Env {
             AppIdentityResolver.Env(parent: { self.parents[$0] },
                                     regularApp: { p in self.regular[p].map { (name: $0.0, bundleID: $0.1) } },
-                                    runningApp: { b in self.running[b].map { (name: $0.0, bundleID: $0.1, pid: $0.2) } })
+                                    runningApp: { b in self.running[b].map { (name: $0.0, bundleID: $0.1, pid: $0.2) } },
+                                    processName: { self.names[$0] })
         }
     }
 
@@ -56,6 +58,18 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertEqual(AppIdentityResolver.resolve(pid: 77, bundleHint: "", env: w.env).key, "pid:77")
         let h = AppIdentityResolver.resolve(pid: 78, bundleHint: "org.example.Thing.helper", env: w.env)   // app not running
         XCTAssertEqual(h.key, "org.example.Thing"); XCTAssertEqual(h.name, "Thing")
+    }
+
+    func testCommandLineProcessesAreNamedByTheirExecutable() {
+        var w = World(); w.names[1351] = "afplay"
+        let id = AppIdentityResolver.resolve(pid: 1351, bundleHint: nil, env: w.env)
+        XCTAssertEqual(id.name, "afplay"); XCTAssertEqual(id.key, "pid:1351")          // still one channel per such process
+        XCTAssertEqual(AppIdentityResolver.resolve(pid: 1352, bundleHint: nil, env: w.env).name, "Process 1352")
+    }
+
+    func testTheSystemResolverNamesARealProcess() {
+        let name = AppIdentityResolver.Env.system.processName(ProcessInfo.processInfo.processIdentifier)
+        XCTAssertNotNil(name); XCTAssertFalse((name ?? "").isEmpty)
     }
 
     func testParentCyclesCannotLoopForever() {
