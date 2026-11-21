@@ -68,7 +68,7 @@ final class SceneManager: ObservableObject {
     func load(_ scene: MixerScene) {
         currentID = scene.id
         pending = [:]
-        let missing = scene.snapshot.apply(to: engine)
+        let missing = scene.snapshot.apply(to: engine, respectRecallSafe: true)
         for m in missing { pending[m.key] = m }
         if let uid = scene.snapshot.outputUID { applyOutputUID(uid) }
     }
@@ -93,7 +93,7 @@ final class SceneManager: ObservableObject {
         let keys = MixerSnapshot.keys(for: chans)
         engine.linkingSuspended = true
         for (key, ch) in zip(keys, chans) where !seenChannels.contains(ch.id) {
-            if let snap = pending[key] { MixerSnapshot.apply(snap, to: ch); pending[key] = nil }
+            if let snap = pending[key] { if !ch.recallSafe { MixerSnapshot.apply(snap, to: ch) }; pending[key] = nil }
         }
         engine.linkingSuspended = false
         seenChannels = Set(chans.map { $0.id })

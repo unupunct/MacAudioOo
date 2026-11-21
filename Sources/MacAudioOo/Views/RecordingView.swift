@@ -1,9 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// The RECORDING tab: transport, one lane per track (MIX + every mixer channel with REC ARM),
-/// live waveforms drawn from the bytes actually being written, destination/disk-space, and the
-/// history of recording sessions with playback.
+/// The RECORDING page: transport card, timeline with one track per source, mixer-settings panel and session history.
 struct RecordingView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var settings: AppSettings
@@ -12,15 +10,25 @@ struct RecordingView: View {
     @StateObject private var player = RecordingPlayer()
     @State private var sessionToDelete: RecordingSession?
     @State private var selectedSession: String?
+    @State private var showHistory = false
 
     var body: some View {
         let engine = state.engine
-        VStack(spacing: 10) {
-            transport(engine)
-            lanes(engine)
-            history(engine)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 12) {
+                transport(engine)
+                timeline(engine)
+                if showHistory { history(engine) }
+                else {
+                    HStack {
+                        Spacer()
+                        PlainButton(title: "Session history (\(recorder.library.sessions.count))", height: 28) { showHistory = true }
+                    }
+                }
+            }
+            settingsPanel(engine).frame(width: 250)
         }
-        .padding(12)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .onAppear { hub.start(engine: engine); recorder.library.refresh(); recorder.refreshFreeSpace() }
         .onDisappear { hub.stop() }
         .confirmationDialog("Move this recording to the Trash?", isPresented: Binding(get: { sessionToDelete != nil }, set: { if !$0 { sessionToDelete = nil } })) {
@@ -32,43 +40,63 @@ struct RecordingView: View {
         } message: { Text(sessionToDelete?.info.name ?? "") }
     }
 
-    // MARK: Transport
+    // MARK: Transport card
 
     private func transport(_ engine: AudioEngine) -> some View {
         let rec = recorder.state
-        return VStack(spacing: 8) {
-            HStack(spacing: 14) {
-                Button(action: { rec == .idle ? recorder.start() : recorder.stop() }) {
-                    HStack(spacing: 6) {
-                        Circle().fill(Theme.record).frame(width: 12, height: 12).opacity(rec == .recording ? 1 : 0.85)
-                        Text(rec == .idle ? "RECORD" : "STOP").font(Theme.title)
-                    }.frame(width: 110, height: 30)
-                }
-                .buttonStyle(.borderedProminent).tint(rec == .idle ? Theme.record.opacity(0.9) : Theme.panelRaised)
-                .disabled(!engine.status.isRunning)
-                .help(rec == .idle ? "Start recording the MIX and all armed channels" : "Stop and save the recording")
-
-                Button(action: { rec == .paused ? recorder.resume() : recorder.pause() }) {
-                    Image(systemName: rec == .paused ? "play.fill" : "pause.fill").frame(width: 30, height: 30)
-                }
-                .disabled(rec == .idle).help(rec == .paused ? "Resume" : "Pause (audio during the pause is not recorded)")
-
-                Text(timeString(recorder.elapsed)).font(.system(size: 30, weight: .semibold, design: .monospaced))
-                    .foregroundColor(rec == .recording ? Theme.record : Theme.textPrimary).frame(width: 190, alignment: .leading)
-
-                statusChip(rec)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                CardTitle(text: "Recording")
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("48 kHz / 24-bit WAV · stereo").font(Theme.value).foregroundColor(Theme.textPrimary)
-                    Text(freeSpaceText).font(.system(size: 10)).foregroundColor(Theme.textSecondary)
+                if rec != .idle {
+                    HStack(spacing: 6) {
+                        Circle().fill(rec == .paused ? Theme.meterYellow : Theme.record).frame(width: 8, height: 8)
+                        Text(rec == .paused ? "PAUSED" : "RECORDING").font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(rec == .paused ? Theme.meterYellow : Theme.record)
+                    }
                 }
             }
-            HStack(spacing: 8) {
-                Text("DESTINATION").font(Theme.label).foregroundColor(Theme.textSecondary)
-                Text(settings.recordingDirectory).font(Theme.value).foregroundColor(Theme.textPrimary).lineLimit(1).truncationMode(.middle)
-                Button("Choose…") { chooseFolder() }.disabled(rec != .idle)
-                Button("Show in Finder") { NSWorkspace.shared.open(URL(fileURLWithPath: settings.recordingDirectory)) }
-                Spacer()
+            HStack(alignment: .center, spacing: 16) {
+                HStack(spacing: 10) {
+                    roundButton(icon: "circle.fill", color: Theme.record, enabled: rec == .idle && engine.status.isRunning,
+                                help: "Start recording the stereo mix and all armed channels") { recorder.start() }
+                    roundButton(icon: "stop.fill", color: Theme.textPrimary, enabled: rec != .idle, help: "Stop and save the recording") { recorder.stop() }
+                    roundButton(icon: rec == .paused ? "play.fill" : "pause.fill", color: Theme.meterGreen, enabled: rec != .idle,
+                                help: rec == .paused ? "Resume" : "Pause (audio during the pause is not recorded)") {
+                        rec == .paused ? recorder.resume() : recorder.pause()
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    labelled("Session Name") {
+                        TextField("Session 1", text: $recorder.sessionName).textFieldStyle(.plain)
+                            .font(.system(size: 12, weight: .medium, design: .rounded)).foregroundColor(Theme.textPrimary)
+                            .padding(.horizontal, 10).frame(height: 30).frame(minWidth: 180)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.well))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                            .disabled(rec != .idle)
+                    }
+                    labelled("Destination Folder") {
+                        HStack(spacing: 6) {
+                            Text(settings.recordingDirectory).font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(Theme.textPrimary).lineLimit(1).truncationMode(.middle)
+                                .padding(.horizontal, 10).frame(height: 30, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.well))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                            PlainButton(title: "Choose…", height: 30) { chooseFolder() }.disabled(rec != .idle)
+                            PlainButton(systemImage: "folder", width: 34, height: 30) { NSWorkspace.shared.open(URL(fileURLWithPath: settings.recordingDirectory)) }
+                                .help("Show in Finder")
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                VStack(spacing: 8) {
+                    Text(timeString(recorder.elapsed)).font(.system(size: 40, weight: .semibold, design: .monospaced))
+                        .foregroundColor(rec == .recording ? Theme.record : Theme.textPrimary).lineLimit(1).fixedSize()
+                    HStack(spacing: 8) {
+                        ValuePill(text: "48 kHz / 24-bit WAV", color: Theme.cyan).fixedSize()
+                        ValuePill(text: diskText).fixedSize()
+                    }
+                }
             }
             if let e = recorder.lastError {
                 Text(e).font(.system(size: 11)).foregroundColor(Theme.meterOrange).frame(maxWidth: .infinity, alignment: .leading)
@@ -77,51 +105,124 @@ struct RecordingView: View {
                 Text(m).font(.system(size: 11)).foregroundColor(Theme.meterYellow).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(12).background(RoundedRectangle(cornerRadius: 8).fill(Theme.panelRaised))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+        .padding(14).glassCard(radius: 16)
     }
 
-    private func statusChip(_ s: RecordingEngine.State) -> some View {
-        let (text, color): (String, Color) = {
-            switch s { case .idle: return ("READY", Theme.textSecondary); case .recording: return ("RECORDING", Theme.record); case .paused: return ("PAUSED", Theme.meterYellow) }
-        }()
-        return HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(text).font(Theme.label).foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
+    private func labelled<C: View>(_ t: String, @ViewBuilder _ c: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(t).font(.system(size: 10, weight: .bold, design: .rounded)).foregroundColor(Theme.textSecondary)
+            c()
         }
-        .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(Theme.well)).overlay(Capsule().stroke(Theme.border))
     }
 
-    private var freeSpaceText: String {
-        guard let free = recorder.freeBytes else { return "Free disk space unknown" }
-        var t = "Free: " + ByteCountFormatter.string(fromByteCount: free, countStyle: .file)
-        if let s = recorder.remainingSeconds { t += " (≈ \(durationString(s)) for \(recorder.plannedTrackCount) track\(recorder.plannedTrackCount == 1 ? "" : "s"))" }
-        return t
+    private func roundButton(icon: String, color: Color, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 18, weight: .bold)).foregroundColor(color)
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(LinearGradient(colors: [Theme.buttonTop, Theme.buttonBottom], startPoint: .top, endPoint: .bottom)))
+                .overlay(Circle().stroke(Theme.borderStrong, lineWidth: 1))
+                .opacity(enabled ? 1 : 0.4)
+        }
+        .buttonStyle(.plain).disabled(!enabled).help(help)
     }
 
-    // MARK: Lanes
+    private var diskText: String {
+        guard let s = recorder.remainingSeconds else {
+            return recorder.freeBytes.map { "Free " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Disk unknown"
+        }
+        return "Disk Time Remaining: " + durationString(s)
+    }
 
-    private func lanes(_ engine: AudioEngine) -> some View {
-        ScrollView(.vertical) {
-            VStack(spacing: 6) {
-                laneRow(title: "MIX", subtitle: "Stereo mix · after master processing", icon: nil,
-                        armed: Binding(get: { recorder.recordMix }, set: { recorder.recordMix = $0 }),
-                        meter: hub.masterL, live: recorder.liveTracks.first { $0.isMix }, recording: recorder.state != .idle)
-                ForEach(engine.channels) { ch in
-                    ChannelLane(channel: ch, meter: hub.model(for: ch), recorder: recorder)
+    // MARK: Timeline
+
+    private func timeline(_ engine: AudioEngine) -> some View {
+        let recording = recorder.state != .idle
+        let windowSeconds = 20.0
+        let end = max(windowSeconds, recorder.elapsed), start = end - windowSeconds
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                CardTitle(text: "Timeline", subtitle: recording ? "Live waveforms of what is being written" : "Arm tracks, then press record")
+                Spacer()
+                ValuePill(text: "last 20 s")
+            }
+            .padding(.bottom, 8)
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 232, height: 20)
+                Canvas { ctx, size in
+                    for sec in Int(ceil(start))...Int(floor(end)) where sec % 5 == 0 {
+                        let x = CGFloat((Double(sec) - start) / windowSeconds) * size.width
+                        var p = Path(); p.move(to: CGPoint(x: x, y: size.height - 8)); p.addLine(to: CGPoint(x: x, y: size.height))
+                        ctx.stroke(p, with: .color(Theme.textMuted), lineWidth: 1)
+                        let t = Text(String(format: "%d:%02d", sec / 60, sec % 60)).font(.system(size: 9, weight: .medium, design: .rounded)).foregroundColor(Theme.textSecondary)
+                        ctx.draw(t, at: CGPoint(x: x + 3, y: 6), anchor: .leading)
+                    }
+                }.frame(height: 20)
+            }
+            ScrollView(.vertical) {
+                VStack(spacing: 6) {
+                    RecTrackRow(index: 1, title: "Mix", icon: nil, color: Theme.padColors[3],
+                             armed: Binding(get: { recorder.recordMix }, set: { recorder.recordMix = $0 }),
+                             meter: hub.masterL, live: recorder.liveTracks.first { $0.isMix }, recording: recording)
+                    ForEach(Array(engine.channels.enumerated()), id: \.element.id) { pair in
+                        ChannelTrack(index: pair.offset + 2, channel: pair.element, meter: hub.model(for: pair.element), recorder: recorder)
+                    }
+                    if engine.channels.isEmpty {
+                        Text("No application channels yet. Channels appear once a capture backend is active; arm them to record separate stems.")
+                            .font(.system(size: 11)).foregroundColor(Theme.textSecondary).padding(10)
+                    }
                 }
-                if engine.channels.isEmpty {
-                    Text("No application channels. Channels appear here once a capture backend is active; arm them to record separate stems.")
-                        .font(.system(size: 11)).foregroundColor(Theme.textSecondary).padding(10)
+                .overlay(alignment: .trailing) {
+                    // Playhead: the newest audio is always at the right edge.
+                    if recording { Rectangle().fill(Theme.cyan).frame(width: 2).shadow(color: Theme.cyan, radius: 4) }
                 }
             }
+            .frame(minHeight: 140, maxHeight: .infinity)
         }
-        .frame(minHeight: 150, maxHeight: 300)
+        .padding(14).glassCard(radius: 16)
+        .frame(maxHeight: .infinity)
     }
 
-    private func laneRow(title: String, subtitle: String, icon: NSImage?, armed: Binding<Bool>, meter: MeterModel,
-                         live: LiveTrack?, recording: Bool) -> some View {
-        LaneRow(title: title, subtitle: subtitle, icon: icon, armed: armed, meter: meter, live: live, recording: recording)
+    // MARK: Settings panel
+
+    private func settingsPanel(_ engine: AudioEngine) -> some View {
+        let locked = recorder.state != .idle
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                CardTitle(text: "Mixer Settings")
+                Spacer()
+                Text("Linked").font(.system(size: 10, weight: .bold, design: .rounded)).foregroundColor(Theme.cyan)
+                    .padding(.horizontal, 8).frame(height: 20).background(Capsule().stroke(Theme.cyan.opacity(0.7)))
+            }
+            Text("What each individual track captures from its mixer channel").font(.system(size: 10)).foregroundColor(Theme.textSecondary)
+            checkRow("EQ", isOn: $recorder.stemsIncludeEQ, enabled: !locked, help: "Apply the channel's EQ and compressor to its track")
+            checkRow("Fader", isOn: $recorder.stemsIncludeFader, enabled: !locked, help: "Apply the channel's fader, mute, solo, group and ducking to its track")
+            checkRow("FX", isOn: .constant(false), enabled: false, help: "Reverb and delay are shared effects: they are only ever recorded in the stereo mix, never duplicated in tracks")
+            Text("FX (reverb, delay) are recorded in the stereo mix only.").font(.system(size: 10)).foregroundColor(Theme.textMuted)
+            Divider().overlay(Theme.border)
+            VStack(alignment: .leading, spacing: 14) {
+                CardTitle(text: "Recording Options")
+                checkRow("Stereo mix", isOn: $recorder.recordMix, enabled: !locked, help: "Record the final stereo output after master processing")
+                checkRow("Individual tracks", isOn: Binding(get: { engine.channels.contains { $0.recArm } },
+                                                            set: { v in engine.channels.forEach { $0.recArm = v } }),
+                         enabled: !locked && !engine.channels.isEmpty, help: "Arm every application channel to record its own file")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14).frame(maxHeight: .infinity, alignment: .top).glassCard(radius: 16)
+    }
+
+    private func checkRow(_ title: String, isOn: Binding<Bool>, enabled: Bool, help: String) -> some View {
+        Button(action: { isOn.wrappedValue.toggle() }) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 5).fill(isOn.wrappedValue ? Theme.blue : Theme.well)
+                    .frame(width: 20, height: 20)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(isOn.wrappedValue ? Theme.cyan.opacity(0.7) : Theme.borderStrong))
+                    .overlay(Image(systemName: "checkmark").font(.system(size: 10, weight: .heavy)).foregroundColor(.white).opacity(isOn.wrappedValue ? 1 : 0))
+                Text(title).font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundColor(Theme.textPrimary)
+                Spacer()
+            }.contentShape(Rectangle()).opacity(enabled ? 1 : 0.45)
+        }
+        .buttonStyle(.plain).disabled(!enabled).help(help)
     }
 
     // MARK: History
@@ -129,14 +230,14 @@ struct RecordingView: View {
     private func history(_ engine: AudioEngine) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("SESSION HISTORY").font(Theme.label).foregroundColor(Theme.textSecondary)
-                Text("\(recorder.library.sessions.count)").font(Theme.value).foregroundColor(Theme.textPrimary)
+                CardTitle(text: "Session history", subtitle: "\(recorder.library.sessions.count) recordings in this folder")
                 Spacer()
                 if let e = player.error { Text(e).font(.system(size: 11)).foregroundColor(Theme.meterOrange) }
+                PlainButton(title: "Hide", height: 26) { showHistory = false }
             }
             if recorder.library.sessions.isEmpty {
                 Text("No recordings in this folder yet.").font(.system(size: 12)).foregroundColor(Theme.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 60)
+                    .frame(maxWidth: .infinity, minHeight: 50)
             } else {
                 ScrollView(.vertical) {
                     VStack(spacing: 6) {
@@ -147,12 +248,10 @@ struct RecordingView: View {
                                        onDelete: { sessionToDelete = s })
                         }
                     }
-                }
+                }.frame(maxHeight: 220)
             }
         }
-        .padding(12).frame(maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+        .padding(14).glassCard(radius: 16)
     }
 
     private func chooseFolder() {
@@ -169,48 +268,57 @@ func durationString(_ s: Double) -> String {
     let m = Int(s / 60); return m >= 120 ? "\(m / 60) h \(m % 60) min" : "\(m) min"
 }
 
-// MARK: - Lanes
+// MARK: - Tracks
 
-struct ChannelLane: View {
+struct ChannelTrack: View {
+    let index: Int
     @ObservedObject var channel: AudioChannel
     @ObservedObject var meter: MeterModel
     @ObservedObject var recorder: RecordingEngine
     var body: some View {
-        LaneRow(title: channel.name, subtitle: channel.pid.map { "PID \($0) · stem after EQ/compressor, before fader" } ?? "stem after EQ/compressor, before fader",
-                icon: channel.icon, armed: $channel.recArm, meter: meter,
-                live: recorder.liveTracks.first { $0.id == channel.id.uuidString }, recording: recorder.state != .idle)
+        RecTrackRow(index: index, title: channel.name, icon: channel.icon,
+                 color: Theme.padColors[(index - 1) % Theme.padColors.count], armed: $channel.recArm, meter: meter,
+                 live: recorder.liveTracks.first { $0.id == channel.id.uuidString }, recording: recorder.state != .idle)
     }
 }
 
-struct LaneRow: View {
+/// One timeline track: number, name, R / S / M buttons, level meter and the coloured waveform bar.
+struct RecTrackRow: View {
+    var index: Int
     var title: String
-    var subtitle: String
     var icon: NSImage?
+    var color: Color
     @Binding var armed: Bool
     @ObservedObject var meter: MeterModel
     var live: LiveTrack?
     var recording: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            Group {
-                if let icon = icon { Image(nsImage: icon).resizable().interpolation(.high) }
-                else { Image(systemName: title == "MIX" ? "slider.horizontal.3" : "waveform").resizable().scaledToFit().padding(5).foregroundColor(Theme.accent) }
-            }.frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundColor(Theme.textPrimary).lineLimit(1)
-                Text(subtitle).font(.system(size: 9)).foregroundColor(Theme.textSecondary).lineLimit(1)
-            }.frame(width: 190, alignment: .leading)
-            ConsoleButton(title: "REC", isOn: $armed, onColor: Theme.record, width: 40,
-                          help: recording ? "Arming is locked while recording" : "Arm this track for recording")
-                .disabled(recording)
-            HorizontalMeterView(model: meter, width: 90, height: 8)
-            WaveformLiveView(peaks: live?.peaks ?? [], recording: recording && live != nil)
-                .frame(height: 38)
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Text("\(index)").font(.system(size: 10, weight: .bold, design: .rounded)).foregroundColor(Theme.textPrimary)
+                    .frame(width: 18, height: 18).background(Circle().fill(Theme.panelRaised))
+                Group {
+                    if let icon = icon { Image(nsImage: icon).resizable().interpolation(.high) }
+                    else { Image(systemName: "slider.horizontal.3").resizable().scaledToFit().padding(4).foregroundColor(Theme.cyan) }
+                }.frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 11, weight: .bold, design: .rounded)).foregroundColor(Theme.textPrimary).lineLimit(1)
+                    HorizontalMeterView(model: meter, width: 70, height: 5)
+                }.frame(width: 76, alignment: .leading)
+            }
+            .frame(width: 130, alignment: .leading)
+            HStack(spacing: 4) {
+                ConsoleButton(title: "R", isOn: $armed, onColor: Theme.record, width: 24, help: recording ? "Arming is locked while recording" : "Arm this track for recording").disabled(recording)
+                ConsoleButton(title: "S", isOn: .constant(false), width: 24, help: "Not available while recording: use solo on the Mixer").disabled(true).opacity(0.4)
+                ConsoleButton(title: "M", isOn: .constant(false), width: 24, help: "Not available while recording: use mute on the Mixer").disabled(true).opacity(0.4)
+            }
+            WaveformLiveView(peaks: live?.peaks ?? [], recording: recording && live != nil, color: color, armed: armed)
+                .frame(height: 44)
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(armed ? Theme.record.opacity(0.7) : Theme.border))
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.well.opacity(0.55)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(armed ? Theme.record.opacity(0.6) : Theme.border))
     }
 }
 
@@ -218,14 +326,16 @@ struct LaneRow: View {
 struct WaveformLiveView: View {
     var peaks: [WaveformPeak]
     var recording: Bool
+    var color: Color = Theme.cyan
+    var armed = false
     var body: some View {
         Canvas { ctx, size in
-            ctx.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 4), with: .color(Theme.well))
+            ctx.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 6), with: .color(color.opacity(armed ? 0.16 : 0.07)))
             let mid = size.height / 2
             var line = Path(); line.move(to: CGPoint(x: 0, y: mid)); line.addLine(to: CGPoint(x: size.width, y: mid))
             ctx.stroke(line, with: .color(.white.opacity(0.08)), lineWidth: 1)
             guard !peaks.isEmpty else { return }
-            let step = max(1, peaks.count / Int(size.width))
+            let step = max(1, peaks.count / max(1, Int(size.width)))
             var path = Path()
             var x = size.width - CGFloat(peaks.count) / CGFloat(step)
             var i = 0
@@ -236,9 +346,9 @@ struct WaveformLiveView: View {
                 path.addLine(to: CGPoint(x: x, y: mid - CGFloat(max(-1, lo)) * mid))
                 x += 1; i += step
             }
-            ctx.stroke(path, with: .color(recording ? Theme.record : Theme.accent), lineWidth: 1)
+            ctx.stroke(path, with: .color(color), lineWidth: 1)
         }
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.border))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.35)))
     }
 }
 

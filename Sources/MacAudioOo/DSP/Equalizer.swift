@@ -1,7 +1,7 @@
 import Foundation
 
 /// 10-band graphic EQ (31.5 Hz … 16 kHz, peaking, Q ≈ 1.41 = one octave) plus a 3-band
-/// tone section (LOW shelf 120 Hz, MID peak 1 kHz, HIGH shelf 6 kHz) used by the channel
+/// tone section (LOW shelf 100 Hz, MID peak 1 kHz, HIGH shelf 8 kHz) used by the channel
 /// strip knobs. All 13 filters are cascaded stereo biquads (transposed direct form II).
 ///
 /// Threading: the UI calls `set(...)`, which computes coefficients on the UI thread into a
@@ -47,9 +47,9 @@ final class EQProcessor {
         let g = Double(gainDB)
         switch band {
         case 0..<10: return .peaking(frequency: graphicFrequencies[band], gainDB: g, q: graphicQ, sampleRate: sampleRate)
-        case 10: return .lowShelf(frequency: 120, gainDB: g, sampleRate: sampleRate)
+        case 10: return .lowShelf(frequency: 100, gainDB: g, sampleRate: sampleRate)
         case 11: return .peaking(frequency: 1000, gainDB: g, q: 0.7, sampleRate: sampleRate)
-        default: return .highShelf(frequency: 6000, gainDB: g, sampleRate: sampleRate)
+        default: return .highShelf(frequency: 8000, gainDB: g, sampleRate: sampleRate)
         }
     }
 

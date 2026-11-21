@@ -139,9 +139,12 @@ final class RecordingLibrary: ObservableObject {
 
     // MARK: Naming
 
-    static func sessionFolderName(for date: Date) -> String {
+    static func sessionFolderName(for date: Date, name: String = "Recording") -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        return "Recording " + f.string(from: date)
+        let bad = CharacterSet(charactersIn: "/:\\?*\"<>|").union(.controlCharacters)
+        var clean = name.components(separatedBy: bad).joined(separator: "_").trimmingCharacters(in: .whitespaces)
+        if clean.isEmpty { clean = "Recording" }
+        return clean + " " + f.string(from: date)
     }
 
     /// File-system-safe, unique file name for a track.

@@ -21,8 +21,8 @@ struct MacAudioOoApp: App {
             RootView()
                 .environmentObject(state)
                 .environmentObject(state.settings)
-                .preferredColorScheme(state.settings.theme.colorScheme)
-                .frame(minWidth: 1180, minHeight: 790)
+                .preferredColorScheme(.dark)
+                .frame(minWidth: 1280, minHeight: 760)
                 .onAppear {
                     SnapshotTool.runIfRequested(state: state)
                     SnapshotTool.runSwitchTestIfRequested(state: state)
@@ -46,7 +46,7 @@ struct MacAudioOoApp: App {
             MixerUndoCommands(history: state.history)
             CommandMenu("View") {
                 ForEach(AppTab.allCases) { tab in
-                    Button(tab.rawValue.capitalized) { state.settings.selectedTab = tab }
+                    Button(tab.title) { state.settings.selectedTab = tab }
                         .keyboardShortcut(tab.shortcut, modifiers: .command)
                 }
             }

@@ -32,6 +32,12 @@ final class RecordingEngine: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var sessionFolder: URL?
     @Published var recordMix = true
+    /// Session name used for the recording folder ("<name> <date time>").
+    @Published var sessionName = "Session 1"
+    /// Stem options: apply each channel's EQ/compressor, and/or its fader (levels). Reverb/delay are shared and only ever in the mix.
+    @Published var stemsIncludeEQ = true
+    @Published var stemsIncludeFader = false
+    private var stemMode: UInt8 { stemsIncludeFader ? 2 : (stemsIncludeEQ ? 1 : 0) }
     @Published private(set) var freeBytes: Int64?
 
     private struct Active {
@@ -50,7 +56,7 @@ final class RecordingEngine: ObservableObject {
     private var pausedValue = false
     private var startedAt = Date()
     private var startRate: Double = 0
-    private var sessionName = ""
+    private var activeSessionName = ""
     private var bag = Set<AnyCancellable>()
 
     init(engine: AudioEngine, library: RecordingLibrary) {
@@ -93,7 +99,7 @@ final class RecordingEngine: ObservableObject {
             lastError = "Less than 200 MB of free disk space at the recording destination."; return
         }
         let now = Date()
-        let folder = library.root.appendingPathComponent(RecordingLibrary.sessionFolderName(for: now), isDirectory: true)
+        let folder = library.root.appendingPathComponent(RecordingLibrary.sessionFolderName(for: now, name: sessionName), isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             startRate = engine.sampleRate
@@ -109,8 +115,8 @@ final class RecordingEngine: ObservableObject {
             if recordMix { try add("Mix", key: "mix", channel: nil, isMix: true) }
             for ch in armed { try add(ch.name, key: ch.id.uuidString, channel: ch.id, isMix: false) }
 
-            sessionName = folder.lastPathComponent
-            let marker = RecordingSessionInfo(id: sessionName, name: sessionName, startedAt: now, sampleRate: 48_000,
+            activeSessionName = folder.lastPathComponent
+            let marker = RecordingSessionInfo(id: activeSessionName, name: activeSessionName, startedAt: now, sampleRate: 48_000,
                                               bitDepth: 24, tracks: planned, recovered: false)
             try RecordingLibrary.encoder.encode(marker).write(to: folder.appendingPathComponent(RecordingLibrary.markerName), options: .atomic)
 
@@ -120,7 +126,7 @@ final class RecordingEngine: ObservableObject {
             // Attach taps last: audio starts flowing into the rings from here on.
             for a in list {
                 if a.key == "mix" { engine.setMixTap(a.writer.ring) }
-                else if let ch = engine.channels.first(where: { $0.id == a.channelID }) { engine.setStemTap(ch, ring: a.writer.ring) }
+                else if let ch = engine.channels.first(where: { $0.id == a.channelID }) { ch.recordTapMode = stemMode; engine.setStemTap(ch, ring: a.writer.ring) }
             }
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + .milliseconds(20), repeating: .milliseconds(20))
@@ -146,7 +152,7 @@ final class RecordingEngine: ObservableObject {
         engine.setMixTap(nil)
         for ch in engine.channels { engine.setStemTap(ch, ring: nil) }
         drainTimer?.cancel(); drainTimer = nil
-        let folder = sessionFolder, started = startedAt, name = sessionName
+        let folder = sessionFolder, started = startedAt, name = activeSessionName
         var errors: [String] = []
         var infos: [RecordedTrackInfo] = []
         queue.sync {

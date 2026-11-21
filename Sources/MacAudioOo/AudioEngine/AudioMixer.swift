@@ -17,7 +17,10 @@ struct ChannelState {
     var source: Unmanaged<ChannelSource>? = nil
     var dsp: Unmanaged<ChannelDSP>? = nil      // optional EQ/compressor/sends chain
     var gainReductionDB: Float = 0             // compressor gain reduction (render thread)
-    var recRing: Unmanaged<AudioRingBuffer>? = nil   // stem recording tap (post EQ/compressor, pre-fader, dry)
+    var recRing: Unmanaged<AudioRingBuffer>? = nil   // stem recording tap
+    /// Where the stem is taken: 0 = raw (before EQ/compressor), 1 = after EQ/compressor, before the fader (default, dry), 2 = after the fader.
+    var recMode: UInt8 = 1
+    var mono = false                           // sum this channel to mono before processing
     var group: Int32 = -1                      // -1 none, 0...3 = group A...D
     var duckGain: Float = 1                    // set by the ducking controller (linear)
     var inputRmsSquares: Float = 0             // pre-fader level of the last block (for ducking triggers)
@@ -133,6 +136,9 @@ final class AudioMixer {
         for c in 0..<Self.maxChannels {
             guard slots[c].active, let src = slots[c].source else { continue }
             src._withUnsafeGuaranteedRef { $0.pull(scratchL, scratchR, frames: n) }
+            if slots[c].mono { for i in 0..<n { let m = (scratchL[i] + scratchR[i]) * 0.5; scratchL[i] = m; scratchR[i] = m } }
+            // Stem tap mode 0: raw channel audio, before any processing.
+            if slots[c].recMode == 0, let rr = slots[c].recRing { rr._withUnsafeGuaranteedRef { $0.write(scratchL, scratchR, frames: n) } }
 
             var revAmt: Float = 0, dlyAmt: Float = 0
             if let d = slots[c].dsp {
@@ -154,8 +160,8 @@ final class AudioMixer {
             for i in 0..<n { inSq += scratchL[i] * scratchL[i] + scratchR[i] * scratchR[i] }
             slots[c].inputRmsSquares = inSq; slots[c].inputRmsCount = Float(n * 2)
 
-            // Stem recording tap: dry, post EQ/compressor, before fader/mute/solo/sends.
-            if let rr = slots[c].recRing { rr._withUnsafeGuaranteedRef { $0.write(scratchL, scratchR, frames: n) } }
+            // Stem tap mode 1 (default): dry, post EQ/compressor, before fader/mute/solo/sends.
+            if slots[c].recMode == 1, let rr = slots[c].recRing { rr._withUnsafeGuaranteedRef { $0.write(scratchL, scratchR, frames: n) } }
 
             let grp = Int(slots[c].group)
             let inGroup = grp >= 0 && grp < 4
@@ -170,6 +176,7 @@ final class AudioMixer {
             for i in 0..<n {
                 g += (target - g) * smoothing
                 let l = scratchL[i] * g * balL, r = scratchR[i] * g * balR
+                scratchL[i] = l; scratchR[i] = r                      // post-fader signal (stem tap mode 2)
                 accL[i] += l; accR[i] += r
                 let m = (l + r) * 0.5
                 if revAmt > 0 { revSend[i] += m * revAmt }
@@ -179,6 +186,8 @@ final class AudioMixer {
                 sq += l * l + r * r
             }
             if abs(g - target) < 1e-5 { g = target }
+            // Stem tap mode 2: as heard, after fader/mute/solo/group/duck (not including the shared effects).
+            if slots[c].recMode == 2, let rr = slots[c].recRing { rr._withUnsafeGuaranteedRef { $0.write(scratchL, scratchR, frames: n) } }
             slots[c].volumeCurrent = g
             if peak > slots[c].peak { slots[c].peak = peak }
             slots[c].rmsSquares = sq; slots[c].rmsCount = Float(n * 2)

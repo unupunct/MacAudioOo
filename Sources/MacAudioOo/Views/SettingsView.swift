@@ -32,9 +32,8 @@ struct SettingsView: View {
 
     private var general: some View {
         section("GENERAL") {
-            Picker("Theme", selection: $settings.theme) { ForEach(ThemeChoice.allCases) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).frame(width: 260)
-            Picker("Default interface", selection: $settings.defaultTab) { ForEach(AppTab.allCases) { Text($0.rawValue.capitalized).tag($0) } }.frame(width: 260)
+            note("The interface uses one dark design.")
+            Picker("Default interface", selection: $settings.defaultTab) { ForEach(AppTab.allCases) { Text($0.title).tag($0) } }.frame(width: 260)
             Toggle("Remember last selected interface", isOn: $settings.rememberLastTab)
             Toggle("Start minimized", isOn: $settings.startMinimized)
             Toggle("Menu bar integration", isOn: $settings.menuBarEnabled)

@@ -3,10 +3,29 @@ import Foundation
 /// Reverb parameters (shared effect). Read by the render thread, written by the UI.
 struct ReverbParams: Codable, Equatable {
     var enabled: Int32 = 1
-    var returnLevel: Float = 0.5     // linear gain of the wet return into the master bus
+    var returnLevel: Float = 1.0     // linear gain of the wet return into the master bus (the UI shows it in dB)
     var roomSize: Float = 0.5        // 0...1 : scales the delay-line lengths (0.6x ... 1.4x)
-    var decaySeconds: Float = 1.8    // RT60
-    var tone: Float = 0.6            // 0 = dark ... 1 = bright (comb damping)
+    var decaySeconds: Float = 1.6    // RT60
+    var toneHz: Float = 8000         // cutoff of the damping low-pass inside the reverb tank
+
+    init() {}
+    /// Tolerant decoding: older saved scenes lack newer keys.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: Keys.self)
+        enabled = try c.decodeIfPresent(Int32.self, forKey: .enabled) ?? 1
+        returnLevel = try c.decodeIfPresent(Float.self, forKey: .returnLevel) ?? 1.0
+        roomSize = try c.decodeIfPresent(Float.self, forKey: .roomSize) ?? 0.5
+        decaySeconds = try c.decodeIfPresent(Float.self, forKey: .decaySeconds) ?? 1.6
+        toneHz = try c.decodeIfPresent(Float.self, forKey: .toneHz) ?? 8000
+    }
+    private enum Keys: String, CodingKey { case enabled, returnLevel, roomSize, decaySeconds, toneHz }
+
+    /// Average comb-filter delay of the reverb tank in milliseconds for a room-size setting (what the SIZE knob reads out).
+    static func sizeMilliseconds(roomSize: Float) -> Float {
+        let step = Float(Int(max(0, min(1, roomSize)) * 16))
+        let scale = 0.6 + 0.8 * step / 16
+        return 1378 / 44.1 * scale          // mean of the eight base comb lengths (samples at 44.1 kHz) -> ms
+    }
 }
 
 /// Freeverb-style reverb: 8 parallel damped comb filters per side into 4 series all-pass
@@ -84,7 +103,8 @@ final class ReverbProcessor {
     func process(input: UnsafePointer<Float>, outL: UnsafeMutablePointer<Float>, outR: UnsafeMutablePointer<Float>,
                  frames: Int, params p: ReverbParams) {
         update(params: p)
-        let damp = (1 - max(0, min(1, p.tone))) * 0.7
+        // One-pole low-pass in every comb: y = x(1-d) + y1*d with d = exp(-2π fc / fs), so toneHz is a true cutoff.
+        let damp = expf(-2 * Float.pi * max(500, min(16000, p.toneHz)) / fs)
         let inGain: Float = 0.03
         for i in 0..<frames {
             let x = input[i] * inGain

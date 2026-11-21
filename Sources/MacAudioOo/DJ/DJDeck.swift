@@ -42,6 +42,12 @@ final class DJDeck: ObservableObject, Identifiable {
     @Published var filter: Float = 0 { didSet { applyFilter() } }
     /// Quantize loop/cue creation to the beat grid when one exists.
     var quantize = true
+    /// SLIP: while a loop runs, the track keeps its true position underneath and playback jumps there when the loop ends.
+    @Published var slip = false
+    /// Size of the auto loop in beats (shown as "4 BEATS").
+    @Published var loopBeats: Double = 4
+    private var slipAnchor: (pos: Double, at: Date)?
+    private var taps: [Date] = []
 
     private var file: AVAudioFile?
     private var fileRate: Double = 44100
@@ -203,6 +209,7 @@ final class DJDeck: ObservableObject, Identifiable {
         let wasPlaying = resume ?? isPlaying
         let f = AVAudioFramePosition(max(0, min(duration, time)) * fileRate)
         if loopActive { loopActive = false }
+        slipAnchor = nil
         let p = player.engine != nil
         if p { player.stop() }
         generation += 1
@@ -271,13 +278,64 @@ final class DJDeck: ObservableObject, Identifiable {
         let start = max(0, g.nearestBeatTime(to: position))
         let len = g.loopLength(beats: beats)
         guard start + len <= duration else { return }
+        loopBeats = beats
         loop = LoopRegion(inTime: start, outTime: start + len)
         engageLoop()
     }
 
+    // MARK: Loop size, slip, tap tempo, BPM correction
+
+    /// Halves / doubles the loop length (in beats, 1/4 ... 32). A running loop is re-cut from its start; otherwise only the size is remembered.
+    func scaleLoop(by factor: Double) {
+        loopBeats = max(0.25, min(32, loopBeats * factor))
+        if loopActive, let g = grid, let l = loop {
+            let len = g.loopLength(beats: loopBeats)
+            guard l.inTime + len <= duration else { return }
+            loop = LoopRegion(inTime: l.inTime, outTime: l.inTime + len)
+            engageLoop()
+        }
+    }
+
+    /// Pad-style loop toggle: engage a `beats`-beat loop, or leave the loop when that same size is already running.
+    func toggleAutoLoop(beats: Double) {
+        if loopActive, abs(loopBeats - beats) < 0.001 { exitLoop() } else { autoLoop(beats: beats) }
+    }
+
+    /// Tap tempo: the average spacing of the last taps (taps more than 2 s apart start over) becomes the track's BPM.
+    func tapTempo() {
+        let now = Date()
+        if let last = taps.last, now.timeIntervalSince(last) > 2 { taps = [] }
+        taps.append(now); if taps.count > 8 { taps.removeFirst() }
+        guard taps.count >= 3 else { return }
+        let intervals = zip(taps.dropFirst(), taps).map { $0.timeIntervalSince($1) }
+        let bpm = 60 / (intervals.reduce(0, +) / Double(intervals.count))
+        setBPM(bpm)
+    }
+
+    /// Replaces the grid's tempo, keeping the first beat (or using the playhead when the track has no grid).
+    func setBPM(_ bpm: Double) {
+        guard file != nil, bpm.isFinite, bpm >= 40, bpm <= 240 else { return }
+        grid = BeatGrid(bpm: bpm, firstBeat: grid?.firstBeat ?? max(0, position))
+    }
+
+    /// Fixes a detected tempo that is an octave off (half-time / double-time).
+    func scaleBPM(by factor: Double) { if let g = grid { setBPM(g.bpm * factor) } }
+
+    /// Tempo match without phase alignment (SYNC also aligns beats).
+    func matchTempo(to master: DJDeck) {
+        guard let g = grid, let target = master.effectiveBPM else { return }
+        let range = dj?.tempoRange ?? 8
+        tempoPercent = max(-range, min(range, (target / g.bpm - 1) * 100))
+    }
+
     func exitLoop() {
         guard loopActive, let l = loop, file != nil else { return }
-        let f = currentFrame()
+        var f = currentFrame()
+        // Slip: the track kept running underneath the loop; resume where it would be now.
+        if slip, let a = slipAnchor {
+            f = AVAudioFramePosition(min(duration, a.pos + Date().timeIntervalSince(a.at) * rate) * fileRate)
+        }
+        slipAnchor = nil
         let wasPlaying = isPlaying
         loopActive = false
         if player.engine != nil { player.stop() }
@@ -305,6 +363,7 @@ final class DJDeck: ObservableObject, Identifiable {
         player.stop()
         anchorFrame = inF; parkedFrame = inF
         player.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
+        if slip, !loopActive, slipAnchor == nil, wasPlaying { slipAnchor = (position, Date()) }
         loopActive = true; needsSchedule = false
         if wasPlaying { player.play(); isPlaying = true }
     }

@@ -28,6 +28,13 @@ enum SnapshotTool {
             state.settings.recordingDirectory = argValue("--recording-label") ?? r
         }
         if args.contains("--demo-channels") { addDemoChannels(state) }
+        if args.contains("--select-first") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                guard let c = state.engine.channels.first else { return }
+                c.applyEQPreset("Music")                              // generated demo channel only
+                EQSelection.shared.channelID = c.id
+            }
+        }
         var demoIDs = Set<UUID>()
         if args.contains("--demo-dj") { addDemoDJ(state) { demoIDs = $0 } }
         let delay = args.contains("--demo-dj") ? 7.0 : 2.5

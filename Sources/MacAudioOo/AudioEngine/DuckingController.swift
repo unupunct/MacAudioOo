@@ -72,7 +72,7 @@ final class DuckingController: ObservableObject {
     }
 
     func isTrigger(_ ch: AudioChannel) -> Bool {
-        DuckingLogic.matches(config.triggerApps, name: ch.name, bundleID: bundleIDProvider(ch))
+        ch.ducksOthers || DuckingLogic.matches(config.triggerApps, name: ch.name, bundleID: bundleIDProvider(ch))
     }
     func isExcluded(_ ch: AudioChannel) -> Bool {
         DuckingLogic.matches(config.excludedApps, name: ch.name, bundleID: bundleIDProvider(ch))

@@ -147,8 +147,8 @@ final class DSPTests: XCTestCase {
 
     func testReverbAndDelayStayBoundedAtExtremeSettings() {
         let rv = ReverbProcessor(sampleRate: sr), dl = DelayProcessor(sampleRate: sr)
-        var rp = ReverbParams(); rp.roomSize = 1; rp.decaySeconds = 10; rp.tone = 1
-        var dp = DelayParams(); dp.feedback = 1.0; dp.timeMs = 50; dp.tone = 1
+        var rp = ReverbParams(); rp.roomSize = 1; rp.decaySeconds = 10; rp.toneHz = 16000
+        var dp = DelayParams(); dp.feedback = 1.0; dp.timeMs = 50; dp.toneHz = 16000
         var seed: UInt32 = 12345
         func noise() -> Float { seed = seed &* 1664525 &+ 1013904223; return Float(seed >> 8) / Float(1 << 24) * 2 - 1 }
         let input = (0..<Int(sr * 6)).map { _ in noise() * 0.5 }
@@ -172,11 +172,11 @@ final class DSPTests: XCTestCase {
         XCTAssertLessThan(maxDl, 20); XCTAssertTrue(maxDl.isFinite)   // feedback is clamped to 0.85
     }
 
-    var rp_: ReverbParams { var p = ReverbParams(); p.roomSize = 1; p.decaySeconds = 10; p.tone = 1; return p }
+    var rp_: ReverbParams { var p = ReverbParams(); p.roomSize = 1; p.decaySeconds = 10; p.toneHz = 16000; return p }
 
     func testDelayEchoTimingAndFeedback() {
         let dl = DelayProcessor(sampleRate: sr)
-        var p = DelayParams(); p.timeMs = 100; p.feedback = 0.5; p.tone = 1
+        var p = DelayParams(); p.timeMs = 100; p.feedback = 0.5; p.toneHz = 16000
         // Let the internal time glide settle on 100 ms first.
         let warm = [Float](repeating: 0, count: Int(sr))
         var l = [Float](repeating: 0, count: 512), r = l

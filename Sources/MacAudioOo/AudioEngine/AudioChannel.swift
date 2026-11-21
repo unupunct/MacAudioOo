@@ -22,6 +22,12 @@ final class AudioChannel: ObservableObject, Identifiable {
     @Published var group: Int = -1 { didSet { slot.pointee.group = Int32(group) } }
     /// Armed for stem recording (locked while a recording is running).
     @Published var recArm = false
+    /// Sum this channel to mono (before EQ/compressor).
+    @Published var mono = false { didSet { slot.pointee.mono = mono } }
+    /// Scene recall leaves this channel's settings alone.
+    @Published var recallSafe = false
+    /// This channel lowers the other applications while it is audible (in addition to the trigger-app list).
+    @Published var ducksOthers = false
     @Published var balance: Float = 0 { didSet { slot.pointee.balance = balance } }
     @Published var mute = false { didSet { slot.pointee.mute = mute } }
     @Published var solo = false { didSet { slot.pointee.solo = solo } }
@@ -45,6 +51,12 @@ final class AudioChannel: ObservableObject, Identifiable {
     init(slotIndex: Int, slot: UnsafeMutablePointer<ChannelState>, dsp: ChannelDSP, name: String, pid: pid_t?, icon: NSImage?) {
         self.slotIndex = slotIndex; self.slot = slot; self.dsp = dsp
         self.name = name; self.pid = pid; self.icon = icon
+    }
+
+    /// Where this channel's stem is recorded from: 0 raw, 1 after EQ/compressor (default), 2 after the fader.
+    var recordTapMode: UInt8 {
+        get { slot.pointee.recMode }
+        set { slot.pointee.recMode = newValue }
     }
 
     func applyEQPreset(_ presetName: String) {

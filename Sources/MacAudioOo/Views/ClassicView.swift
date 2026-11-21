@@ -19,12 +19,11 @@ struct ClassicView: View {
             if engine.channels.isEmpty { emptyState } else { list(engine) }
             masterPanel(engine)
             if showEQ {
-                EQEditorView(title: "MASTER EQ", gains: Binding(get: { engine.masterEQGains }, set: { engine.masterEQGains = $0 }),
+                EQCardView(title: "Master EQ", gains: Binding(get: { engine.masterEQGains }, set: { engine.masterEQGains = $0 }),
                              bypass: Binding(get: { engine.masterEQBypass }, set: { engine.masterEQBypass = $0 }),
                              presetName: Binding(get: { engine.masterEQPresetName }, set: { engine.masterEQPresetName = $0 }),
-                             applyPreset: { engine.applyMasterEQPreset($0) }, response: { engine.masterEQ.responseDB(at: $0) })
-                    .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Theme.panel))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                             applyPreset: { engine.applyMasterEQPreset($0) }, response: { engine.masterEQ.responseDB(at: $0) },
+                             plotHeight: 130)
             }
         }
         .padding(14)

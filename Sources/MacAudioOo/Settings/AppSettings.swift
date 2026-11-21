@@ -2,13 +2,27 @@ import Foundation
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case console = "CONSOLE", classic = "CLASSIC", recording = "RECORDING"
-    case dj = "DJ", library = "LIBRARY", settings = "SETTINGS"
+    // Raw values are persisted: `.console` is the Mixer (kept as "CONSOLE" so saved preferences still load).
+    case console = "CONSOLE", eq = "EQ", classic = "CLASSIC", recording = "RECORDING"
+    case dj = "DJ", library = "LIBRARY", presets = "PRESETS", settings = "SETTINGS"
     var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .console: return "Mixer"; case .eq: return "EQ"; case .classic: return "Classic"; case .recording: return "Recording"
+        case .dj: return "DJ"; case .library: return "Library"; case .presets: return "Presets"; case .settings: return "Settings"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .console: return "slider.vertical.3"; case .eq: return "waveform.path"; case .classic: return "list.bullet"
+        case .recording: return "record.circle"; case .dj: return "headphones"; case .library: return "music.note.list"
+        case .presets: return "square.stack.3d.up"; case .settings: return "gearshape"
+        }
+    }
     var shortcut: KeyEquivalent {
         switch self {
-        case .console: return "1"; case .classic: return "2"; case .recording: return "3"
-        case .dj: return "4"; case .library: return "5"; case .settings: return "6"
+        case .console: return "1"; case .eq: return "2"; case .classic: return "3"; case .recording: return "4"
+        case .dj: return "5"; case .library: return "6"; case .presets: return "7"; case .settings: return "8"
         }
     }
 }

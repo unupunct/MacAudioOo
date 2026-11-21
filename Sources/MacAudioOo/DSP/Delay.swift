@@ -1,11 +1,22 @@
 import Foundation
 
 struct DelayParams: Codable, Equatable {
-    var enabled: Int32 = 1
-    var returnLevel: Float = 0.5
-    var timeMs: Float = 350
-    var feedback: Float = 0.35       // clamped to 0...0.85 so the loop can never run away
-    var tone: Float = 0.6            // 0 = dark ... 1 = bright (low-pass in the feedback path)
+    var enabled: Int32 = 0
+    var returnLevel: Float = 1.0     // linear (the UI shows it in dB)
+    var timeMs: Float = 375
+    var feedback: Float = 0.35       // "repeats"; clamped to 0...0.85 so the loop can never run away
+    var toneHz: Float = 6000         // low-pass cutoff in the feedback path: repeats get darker
+
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: Keys.self)
+        enabled = try c.decodeIfPresent(Int32.self, forKey: .enabled) ?? 0
+        returnLevel = try c.decodeIfPresent(Float.self, forKey: .returnLevel) ?? 1.0
+        timeMs = try c.decodeIfPresent(Float.self, forKey: .timeMs) ?? 375
+        feedback = try c.decodeIfPresent(Float.self, forKey: .feedback) ?? 0.35
+        toneHz = try c.decodeIfPresent(Float.self, forKey: .toneHz) ?? 6000
+    }
+    private enum Keys: String, CodingKey { case enabled, returnLevel, timeMs, feedback, toneHz }
 }
 
 /// Stereo feedback delay. Delay time changes are smoothed; feedback is hard-limited below
@@ -38,7 +49,7 @@ final class DelayProcessor {
                  frames: Int, params p: DelayParams) {
         let target = Double(max(1, min(Self.maxSeconds * 1000, p.timeMs))) * 0.001 * Double(fs)
         let fb = max(0, min(0.85, p.feedback))
-        let lpCoef = 0.05 + 0.95 * max(0, min(1, p.tone))
+        let lpCoef = 1 - expf(-2 * Float.pi * max(500, min(16000, p.toneHz)) / fs)    // one-pole low-pass cutoff
         var diff = target - curDelay
         if abs(diff) < 0.001 { curDelay = target; diff = 0 }
         let step = diff / Double(max(1, frames)) * 0.2                  // glide toward the new time

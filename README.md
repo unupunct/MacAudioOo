@@ -7,7 +7,7 @@ Per-application volume, a 10-band EQ and compressor on every channel, shared rev
 multitrack WAV recording, and a two/four-deck DJ player with BPM detection and beat sync — all in one dark,
 console-style window. Written in Swift/SwiftUI/AppKit on Core Audio. No account, no subscription, no network.
 
-![Console](docs/screenshots/console-detail.png)
+![Console](docs/screenshots/eq.png)
 
 | Classic | Recording |
 |---|---|
@@ -20,7 +20,7 @@ console-style window. Written in Swift/SwiftUI/AppKit on Core Audio. No account,
 
 ## What it does
 
-- **Console** – channel strips (meter, fader, balance, HIGH/MID/LOW, reverb/delay sends, EQ, COMP, GRP, REC, MUTE, SOLO), master
+- **Mixer / EQ** – channel strips (S/M, dB fader, meter, app icon), highlighted MASTER strip in percent, a 10-band draggable EQ card, channel tone/compressor/sends, shared reverb/delay, ducking & monitor; master
   section (volume, MUTE, DIM, MONO, limiter, master EQ), groups A–D (group fader, mute, solo, link, spill), scenes, undo/redo.
 - **Classic** – the same engine as a compact list: volume, meter and mute per application, master volume/EQ, output device.
 - **Recording** – real multitrack recording to 48 kHz / 24-bit stereo WAV: the stereo mix plus one dry stem per armed

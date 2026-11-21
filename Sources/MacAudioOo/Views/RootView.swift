@@ -1,65 +1,46 @@
 import SwiftUI
 
+/// Which target the EQ card edits: the master bus (nil) or one application channel.
+final class EQSelection: ObservableObject {
+    static let shared = EQSelection()
+    @Published var channelID: UUID? = nil
+}
+
 struct RootView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var settings: AppSettings
+    @ObservedObject private var eqSelection = EQSelection.shared
+
+    private var showsSidebar: Bool {
+        switch settings.selectedTab { case .console, .eq, .recording: return true; default: return false }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
-            Divider().overlay(Theme.border)
-            Group {
-                switch settings.selectedTab {
-                case .settings: SettingsView()
-                case .console: ConsoleView()
-                case .classic: ClassicView()
-                case .recording: RecordingView(recorder: state.recorder)
-                case .dj: DJView(dj: state.dj)
-                case .library: LibraryView(library: state.library, dj: state.dj)
+            if settings.selectedTab != .dj { NavBar(recorder: state.recorder) }   // the DJ page has its own header
+            HStack(spacing: 0) {
+                if showsSidebar { SidebarView() }
+                Group {
+                    switch settings.selectedTab {
+                    case .settings: SettingsView()
+                    case .console: MixerView()
+                    case .eq: EQPageView()
+                    case .classic: ClassicView()
+                    case .recording: RecordingView(recorder: state.recorder)
+                    case .dj: DJView(dj: state.dj)
+                    case .library: LibraryView(library: state.library, dj: state.dj)
+                    case .presets: PresetsView()
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxHeight: .infinity)
+            .clipped()
         }
-        .background(Theme.bg)
-    }
-}
-
-struct TopBar: View {
-    @EnvironmentObject var state: AppState
-    @EnvironmentObject var settings: AppSettings
-
-    var body: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 6) {
-                Image(systemName: "waveform.circle.fill").font(.system(size: 20)).foregroundColor(Theme.accent)
-                Text("MacAudioOo").font(Theme.title).foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
-            }
-            HStack(spacing: 2) {
-                ForEach(AppTab.allCases) { tab in
-                    Button(action: { settings.selectedTab = tab }) {
-                        Text(tab.rawValue).font(Theme.label).lineLimit(1).fixedSize()
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .foregroundColor(settings.selectedTab == tab ? .black : Theme.textSecondary)
-                            .background(RoundedRectangle(cornerRadius: 5)
-                                .fill(settings.selectedTab == tab ? Theme.accent : Color.clear))
-                    }.buttonStyle(.plain)
-                }
-            }
-            Spacer()
-            EngineStatusPill()
-            OutputPicker()
-            HStack(spacing: 6) {
-                Text("MASTER").font(Theme.label).foregroundColor(Theme.textSecondary).lineLimit(1).fixedSize()
-                Slider(value: Binding(get: { Double(state.engine.masterVolumeDB) },
-                                      set: { state.engine.masterVolumeDB = Float($0) }), in: -60...6)
-                    .frame(width: 80)
-                Text(dbString(state.engine.masterVolumeDB)).font(Theme.value)
-                    .foregroundColor(Theme.textPrimary).frame(width: 58, alignment: .trailing)
-            }
-            .help("Master output volume (-∞ to +6 dB). Smoothed in the real-time mixer.")
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Theme.panel)
+        .background(LinearGradient(colors: [Theme.bgTop, Theme.bg], startPoint: .top, endPoint: .bottom))
+        .background(WindowConfigurator())
+        .environmentObject(eqSelection)
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -72,10 +53,11 @@ struct EngineStatusPill: View {
     }
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(healthColor).frame(width: 8, height: 8)
-            Text(state.engineStatusText).font(Theme.label).foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
+            Circle().fill(healthColor).frame(width: 8, height: 8).shadow(color: healthColor.opacity(0.8), radius: 3)
+            Text(state.engineStatusText).font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(Theme.textPrimary).lineLimit(1).fixedSize()
         }
-        .padding(.horizontal, 10).padding(.vertical, 5)
+        .padding(.horizontal, 12).frame(height: 28)
         .background(Capsule().fill(Theme.well))
         .overlay(Capsule().stroke(Theme.border))
         .help(state.engineStatusDetail)
@@ -86,36 +68,49 @@ struct OutputPicker: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var settings: AppSettings
 
+    private var label: String {
+        if let uid = settings.outputDeviceUID, let d = state.devices.outputDevices.first(where: { $0.uid == uid }) { return d.name }
+        if state.selectedOutputMissing { return "Disconnected device" }
+        return "System Default"
+    }
+
+    private var items: [(id: String, title: String)] {
+        var list: [(id: String, title: String)] = [("", "System Default")]
+        list += state.devices.outputDevices.map { ($0.uid, $0.name) }
+        return list
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: state.selectedOutputMissing ? "exclamationmark.triangle.fill" : "speaker.wave.2.fill")
-                .foregroundColor(state.selectedOutputMissing ? Theme.meterYellow : Theme.textSecondary)
-            Picker("", selection: Binding(
-                get: { settings.outputDeviceUID ?? "" },
-                set: { settings.outputDeviceUID = $0.isEmpty ? nil : $0 })) {
-                Text("System Default").tag("")
-                ForEach(state.devices.outputDevices) { d in Text(d.name).tag(d.uid) }
-                if state.selectedOutputMissing, let uid = settings.outputDeviceUID {
-                    Text("Disconnected device").tag(uid)
-                }
-            }
-            .labelsHidden().frame(width: 150)
-        }
-        .help(state.selectedOutputMissing
-              ? "The chosen output device is disconnected. MacAudioOo falls back to the system default and will not change it."
-              : "Output device used by MacAudioOo. The system default device is never changed.")
+        DropdownField(label: label, items: items, width: 190,
+                      systemImage: state.selectedOutputMissing ? "exclamationmark.triangle.fill" : "speaker.wave.2.fill",
+                      height: 30) { id in settings.outputDeviceUID = id.isEmpty ? nil : id }
+            .help(state.selectedOutputMissing
+                  ? "The chosen output device is disconnected. MacAudioOo falls back to the system default and will not change it."
+                  : "Output device used by MacAudioOo. The system default device is never changed.")
     }
 }
 
-struct NotImplementedView: View {
-    let tab: String, phase: String, detail: String
+/// Section title used on the page cards.
+struct CardTitle: View {
+    var text: String
+    var subtitle: String? = nil
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "hammer").font(.system(size: 30)).foregroundColor(Theme.textSecondary)
-            Text("\(tab) is not implemented yet").font(Theme.title).foregroundColor(Theme.textPrimary)
-            Text("Planned for \(phase)").font(Theme.label).foregroundColor(Theme.accent)
-            Text(detail).font(.system(size: 12)).foregroundColor(Theme.textSecondary)
-                .multilineTextAlignment(.center).frame(maxWidth: 420)
+        VStack(alignment: .leading, spacing: 1) {
+            Text(text).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundColor(Theme.textPrimary)
+            if let s = subtitle { Text(s).font(.system(size: 10, weight: .medium, design: .rounded)).foregroundColor(Theme.textSecondary) }
         }
+    }
+}
+
+/// Small rounded read-out pill (dB values, formats).
+struct ValuePill: View {
+    var text: String
+    var width: CGFloat? = nil
+    var color: Color = Theme.textPrimary
+    var body: some View {
+        Text(text).font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundColor(color)
+            .lineLimit(1).frame(width: width).padding(.horizontal, 8).frame(height: 22)
+            .background(Capsule().fill(Theme.well))
+            .overlay(Capsule().stroke(Theme.border))
     }
 }
